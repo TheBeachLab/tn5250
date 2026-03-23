@@ -18,3 +18,7 @@ xt5250
 autom4te.cache/
 termcap/*/5/
 termcap/*/x/
+
+# Claude Code
+.claude/
+CLAUDE.md

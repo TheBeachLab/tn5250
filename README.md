@@ -1,95 +1,90 @@
-tn5250
-======
+# tn5250 — Fork with CCSID 1145 (Euro) Support
 
-This is an implementation of the 5250 telnet protocol. It was originally an
-implementation for Linux, but it has been reportedly compiled on a number
-of other platforms. Contributed keyboard maps and termcap entries for
-FreeBSD are in this tarball as well (see freebsd/README for more information).
+Fork of [tn5250/tn5250](https://github.com/tn5250/tn5250) adding CCSID 1145 (Spain/Latin America + Euro sign) support with wide-character rendering.
 
-Building from Git
------------------
+## What This Fork Adds
 
-Skip to "Building and Installing" below if you got these sources from a
-.tar.gz release file.
+**CCSID 1145 support** — the Euro-enabled variant of CCSID 284 (Spain). The Euro sign (U+20AC) is properly rendered on UTF-8 terminals using ncurses wide-character support (`add_wch`).
 
-Certain files, such as the libtool support files and some shell scripts
-which replace possibly missing commands on the target system are not in
-git because we don't maintain them. They can be installed with the
-following command:
+The upstream tn5250 only supports CCSID 284 which lacks the Euro sign. CCSID 1145 is identical to 284 except EBCDIC byte 0x9F maps to € instead of ¤.
 
-```bash
-./autogen.sh
-```
+> **Note:** The accented character fix ([setlocale issue](https://github.com/tn5250/tn5250/pull/56)) is now fixed upstream in commit [e1ce065](https://github.com/tn5250/tn5250/commit/e1ce0657105248afce6bf7d1fb7e433861864e1c).
 
-This command requires current versions of the following packages, and the
-generated files may not work properly.
+## Pre-built Binary (macOS arm64)
+
+A signed and Apple-notarized binary is available in [Releases](https://github.com/TheBeachLab/tn5250/releases).
+
+- **Signed:** Developer ID Application: Beach Lab LTD
+- **Notarized:** Apple notarization accepted (no Gatekeeper warnings)
+
+### Install pre-built binary
 
 ```bash
-automake
-autoconf
-libtool
+# Install dependencies
+brew install ncurses openssl@3 luit
+
+# Download and install
+curl -L https://github.com/TheBeachLab/tn5250/releases/latest/download/tn5250-0.19.0-macos-arm64.zip -o /tmp/tn5250.zip
+unzip /tmp/tn5250.zip -d /tmp/tn5250-bin
+cp /tmp/tn5250-bin/tn5250 ~/.local/bin/tn5250
+chmod +x ~/.local/bin/tn5250
 ```
 
-You may receive an error the first time you run this script. If so, run
-the script a second time to make sure you don't get an error (this is a bug
-with automake).
-
-
-Building and Installing
------------------------
-
-To build the emulator simply type the following:
+## Build from Source
 
 ```bash
-./configure
-make
-make install
+# Dependencies (macOS)
+brew install ncurses openssl@3 cmake
+
+# Build
+git clone https://github.com/TheBeachLab/tn5250.git
+cd tn5250
+mkdir build && cd build
+cmake .. -DCMAKE_C_FLAGS="-I$(brew --prefix ncurses)/include"
+make -j4
+
+# Binary at curses/tn5250
+cp curses/tn5250 ~/.local/bin/tn5250
 ```
 
-Additional (but decidedly generic) installation instructions are available
-in the INSTALL file included in this distribution tarfile. Installation
-instructions specific to your platform exist if you are using Linux or
-FreeBSD -- they are in the linux/ and freebsd/ directories, respectively.
-Please read these before telling us that the function keys don't work ;-)
+## Usage
 
-The emulator uses the ncurses library for manipulating the console. Make
-sure you have the ncurses development libraries installed before trying to
-compile the source. There have been both reports of the standard BSD curses
-working and not working, so you may have to install ncurses under *BSD.
-
-X Windows
----------
-
-To use the emulator under X Windows, use the provided `xt5250` shell script,
-which sets up a standard `xterm` (it will *not* work with an `nxterm` or an
-`rxvt` terminal).
-
-There is one common problem which would cause `xt5250` to flash once on the
-screen then disappear. If the termcap or terminfo entry for the "xterm-5250"
-terminal type does not exist, `xterm` will exit immediately.
-
-Windows
--------
-
-To build on Windows, use [CMake](https://cmake.org/):
-
-```ps1
-New-Item -Path build -Type Directory
-$cmake = (Join-Path -Path (Get-ItemProperty `
-        -Path HKLM://HKEY_LOCAL_MACHINE\SOFTWARE\Kitware\CMake `
-        -Name InstallDir).InstallDir `
-        -ChildPath "bin/cmake.exe")
-Start-Process -FilePath $cmake -Wait -NoNewWindow -ArgumentList "-S . -B .\build\"
-Start-Process -FilePath $cmake -Wait -NoNewWindow -ArgumentList "--build build"
+```bash
+tn5250 map=1145 env.TERM=IBM-3179-2 your.as400.host:23
 ```
 
-Other Information
------------------
+For ISO-8859-15 terminal compatibility (e.g. inside tmux), wrap with `luit`:
 
-Other information is available on the web.
+```bash
+luit -encoding ISO-8859-15 tn5250 map=1145 env.TERM=IBM-3179-2 your.as400.host:23
+```
 
-- [tn5250 Homepage](https://tn5250.github.io)
-- [Issue tracker](https://github.com/tn5250/tn5250/issues)
-- [Former home at SourceForge](http://sourceforge.net/projects/tn5250/)
+### Common EBCDIC code pages
 
-Enjoy!
+| Code page | Language | Map parameter |
+|-----------|----------|---------------|
+| 37 | US English | `map=37` |
+| 284 | Spain | `map=284` |
+| **1145** | **Spain + Euro** | **`map=1145`** |
+| 273 | Germany | `map=273` |
+| 297 | France | `map=297` |
+| 280 | Italy | `map=280` |
+| 278 | Sweden/Finland | `map=278` |
+| 500 | International | `map=500` |
+
+### Terminal types
+
+| Type | Dimensions | Description |
+|------|-----------|-------------|
+| IBM-3179-2 | 24x80 | Standard color (default) |
+| IBM-3477-FC | 27x132 | Wide mode color |
+| IBM-3477-FG | 27x132 | Wide mode monochrome |
+
+## License
+
+GPL-2.0 (same as upstream tn5250)
+
+## Credits
+
+- Original project: [tn5250/tn5250](https://github.com/tn5250/tn5250)
+- CCSID 1145 support and macOS build: [Beach Lab LTD](https://beachlab.org)
