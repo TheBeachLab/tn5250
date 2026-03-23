@@ -223,6 +223,32 @@ Tn5250Char tn5250_char_map_to_local(Tn5250CharMap* map, Tn5250Char ebcdic) {
     }
 }
 
+/****f* lib5250/tn5250_char_map_to_local_wc
+ * NAME
+ *    tn5250_char_map_to_local_wc
+ * SYNOPSIS
+ *    wc = tn5250_char_map_to_local_wc (map, ebcdic);
+ * INPUTS
+ *    Tn5250Char           ebcdic     - The remote character to translate.
+ * DESCRIPTION
+ *    Translate the specified character from remote to local, returning a
+ *    wide character.  If the map has a wide-char table (to_local_map_wc),
+ *    it is used; otherwise falls back to the byte table.
+ *****/
+wchar_t tn5250_char_map_to_local_wc(Tn5250CharMap* map, Tn5250Char ebcdic) {
+    switch (ebcdic) {
+    case 0x1C:
+        return L'*';
+    case 0:
+        return L' ';
+    default:
+        if (map->to_local_map_wc != NULL) {
+            return map->to_local_map_wc[ebcdic];
+        }
+        return (wchar_t)map->to_local_map[ebcdic];
+    }
+}
+
 /****f* lib5250/tn5250_char_map_new
  * NAME
  *    tn5250_char_map_new
