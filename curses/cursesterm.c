@@ -654,7 +654,8 @@ static void curses_terminal_update(Tn5250Terminal* This,
     int my, mx;
     int y, x;
     attr_t curs_attr;
-    unsigned char a = 0x20, c;
+    unsigned char a = 0x20;
+    wchar_t c;
 
     This->data->display = display;
 
@@ -736,7 +737,7 @@ static void curses_terminal_update(Tn5250Terminal* This,
                         c = ' ';
                     }
                     else {
-                        c = tn5250_char_map_to_local(
+                        c = tn5250_char_map_to_local_wc(
                             tn5250_display_char_map(display), c);
                     }
                     if ((curs_attr & A_VERTICAL) != 0) {
@@ -756,7 +757,15 @@ static void curses_terminal_update(Tn5250Terminal* This,
                     if (curses_terminal_is_ruler(This, display, x, y)) {
                         curs_attr |= A_REVERSE;
                     }
-                    addch((chtype)(c | curs_attr));
+                    if (c > 0xFF) {
+                        cchar_t cc;
+                        wchar_t wstr[2] = { c, L'\0' };
+                        setcchar(&cc, wstr, (curs_attr & A_ATTRIBUTES) & ~A_COLOR,
+                                 (short)PAIR_NUMBER(curs_attr), NULL);
+                        add_wch(&cc);
+                    } else {
+                        addch((chtype)(c | curs_attr));
+                    }
                 }
             } /* if ((c & 0xe0) ... */
         }     /* for (int x ... */

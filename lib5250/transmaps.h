@@ -2814,48 +2814,88 @@ unsigned char const ibm1026_to_windows_1254[256] = {
     56,  57,  179, 219, 34,  217, 218, 158, /* 248 - 255  */
 };
 
+/* CCSID 1145: Spain/Latin America + Euro.
+   Identical to IBM284 except EBCDIC 0x9F maps to U+20AC (Euro sign)
+   instead of U+00A4 (currency sign). Requires wchar_t for the Euro code point.  */
+
+wchar_t const ibm1145_to_local_wc[256] = {
+    0,   1,   2,   3,   156, 9,   134, 127, /*   0 -   7  */
+    151, 141, 142, 11,  12,  13,  14,  15,  /*   8 -  15  */
+    16,  17,  18,  19,  157, 133, 8,   135, /*  16 -  23  */
+    24,  25,  146, 143, 28,  29,  30,  31,  /*  24 -  31  */
+    128, 129, 130, 131, 132, 10,  23,  27,  /*  32 -  39  */
+    136, 137, 138, 139, 140, 5,   6,   7,   /*  40 -  47  */
+    144, 145, 22,  147, 148, 149, 150, 4,   /*  48 -  55  */
+    152, 153, 154, 155, 20,  21,  158, 26,  /*  56 -  63  */
+    32,  160, 226, 228, 224, 225, 227, 229, /*  64 -  71  */
+    231, 166, 91,  46,  60,  40,  43,  124, /*  72 -  79  */
+    38,  233, 234, 235, 232, 237, 238, 239, /*  80 -  87  */
+    236, 223, 93,  36,  42,  41,  59,  172, /*  88 -  95  */
+    45,  47,  194, 196, 192, 193, 195, 197, /*  96 - 103  */
+    199, 35,  241, 44,  37,  95,  62,  63,  /* 104 - 111  */
+    248, 201, 202, 203, 200, 205, 206, 207, /* 112 - 119  */
+    204, 96,  58,  209, 64,  39,  61,  34,  /* 120 - 127  */
+    216, 97,  98,  99,  100, 101, 102, 103, /* 128 - 135  */
+    104, 105, 171, 187, 240, 253, 254, 177, /* 136 - 143  */
+    176, 106, 107, 108, 109, 110, 111, 112, /* 144 - 151  */
+    113, 114, 170, 186, 230, 184, 198, 0x20AC, /* 152 - 159  0x9F = Euro */
+    181, 168, 115, 116, 117, 118, 119, 120, /* 160 - 167  */
+    121, 122, 161, 191, 208, 221, 222, 174, /* 168 - 175  */
+    162, 163, 165, 183, 169, 167, 182, 188, /* 176 - 183  */
+    189, 190, 94,  33,  175, 126, 180, 215, /* 184 - 191  */
+    123, 65,  66,  67,  68,  69,  70,  71,  /* 192 - 199  */
+    72,  73,  173, 244, 246, 242, 243, 245, /* 200 - 207  */
+    125, 74,  75,  76,  77,  78,  79,  80,  /* 208 - 215  */
+    81,  82,  185, 251, 252, 249, 250, 255, /* 216 - 223  */
+    92,  247, 83,  84,  85,  86,  87,  88,  /* 224 - 231  */
+    89,  90,  178, 212, 214, 210, 211, 213, /* 232 - 239  */
+    48,  49,  50,  51,  52,  53,  54,  55,  /* 240 - 247  */
+    56,  57,  179, 219, 220, 217, 218, 159, /* 248 - 255  */
+};
+
 /* This is the translation-map index which is scanned in utility.c
  */
 
 Tn5250CharMap tn5250_transmaps[] = {
     // clang-format off
-    { "37",      iso_8859_1_to_ibm037,    ibm037_to_iso_8859_1    },
-    { "256",     iso_8859_1_to_ibm256,    ibm256_to_iso_8859_1    },
-    { "273",     iso_8859_1_to_ibm273,    ibm273_to_iso_8859_1    },
-    { "277",     iso_8859_1_to_ibm277,    ibm277_to_iso_8859_1    },
-    { "278",     iso_8859_1_to_ibm278,    ibm278_to_iso_8859_1    },
-    { "280",     iso_8859_1_to_ibm280,    ibm280_to_iso_8859_1    },
-    { "284",     iso_8859_1_to_ibm284,    ibm284_to_iso_8859_1    },
-    { "285",     iso_8859_1_to_ibm285,    ibm285_to_iso_8859_1    },
-    { "297",     iso_8859_1_to_ibm297,    ibm297_to_iso_8859_1    },
-    { "500",     iso_8859_1_to_ibm500,    ibm500_to_iso_8859_1    },
-    { "871",     iso_8859_1_to_ibm871,    ibm871_to_iso_8859_1    },
-    { "870",     iso_8859_2_to_ibm870,    ibm870_to_iso_8859_2    },
-    { "905",     iso_8859_3_to_ibm905,    ibm905_to_iso_8859_3    },
-    { "880",     iso_8859_5_to_ibm880,    ibm880_to_iso_8859_5    },
-    { "420",     iso_8859_6_to_ibm420,    ibm420_to_iso_8859_6    },
-    { "875",     iso_8859_7_to_ibm875,    ibm875_to_iso_8859_7    },
-    { "424",     iso_8859_8_to_ibm424,    ibm424_to_iso_8859_8    },
-    { "1026",    iso_8859_9_to_ibm1026,   ibm1026_to_iso_8859_9   },
-    { "290",     jis_x0201_to_ibm290,     ibm290_to_jis_x0201     },
-    { "win37",   windows_1252_to_ibm037,  ibm037_to_windows_1252  },
-    { "win256",  windows_1252_to_ibm256,  ibm256_to_windows_1252  },
-    { "win273",  windows_1252_to_ibm273,  ibm273_to_windows_1252  },
-    { "win277",  windows_1252_to_ibm277,  ibm277_to_windows_1252  },
-    { "win278",  windows_1252_to_ibm278,  ibm278_to_windows_1252  },
-    { "win280",  windows_1252_to_ibm280,  ibm280_to_windows_1252  },
-    { "win284",  windows_1252_to_ibm284,  ibm284_to_windows_1252  },
-    { "win285",  windows_1252_to_ibm285,  ibm285_to_windows_1252  },
-    { "win297",  windows_1252_to_ibm297,  ibm297_to_windows_1252  },
-    { "win500",  windows_1252_to_ibm500,  ibm500_to_windows_1252  },
-    { "win871",  windows_1252_to_ibm871,  ibm871_to_windows_1252  },
-    { "win870",  windows_1250_to_ibm870,  ibm870_to_windows_1250  },
-    { "win905",  windows_1254_to_ibm905,  ibm905_to_windows_1254  },
-    { "win880",  windows_1251_to_ibm880,  ibm880_to_windows_1251  },
-    { "win420",  windows_1256_to_ibm420,  ibm420_to_windows_1256  },
-    { "win875",  windows_1253_to_ibm875,  ibm875_to_windows_1253  },
-    { "win424",  windows_1255_to_ibm424,  ibm424_to_windows_1255  },
-    { "win1026", windows_1254_to_ibm1026, ibm1026_to_windows_1254 },
-    { NULL,      NULL,                    NULL                    }
+    { "37",      iso_8859_1_to_ibm037,    ibm037_to_iso_8859_1,    NULL },
+    { "256",     iso_8859_1_to_ibm256,    ibm256_to_iso_8859_1,    NULL },
+    { "273",     iso_8859_1_to_ibm273,    ibm273_to_iso_8859_1,    NULL },
+    { "277",     iso_8859_1_to_ibm277,    ibm277_to_iso_8859_1,    NULL },
+    { "278",     iso_8859_1_to_ibm278,    ibm278_to_iso_8859_1,    NULL },
+    { "280",     iso_8859_1_to_ibm280,    ibm280_to_iso_8859_1,    NULL },
+    { "284",     iso_8859_1_to_ibm284,    ibm284_to_iso_8859_1,    NULL },
+    { "1145",    iso_8859_1_to_ibm284,    ibm284_to_iso_8859_1,    ibm1145_to_local_wc },
+    { "285",     iso_8859_1_to_ibm285,    ibm285_to_iso_8859_1,    NULL },
+    { "297",     iso_8859_1_to_ibm297,    ibm297_to_iso_8859_1,    NULL },
+    { "500",     iso_8859_1_to_ibm500,    ibm500_to_iso_8859_1,    NULL },
+    { "871",     iso_8859_1_to_ibm871,    ibm871_to_iso_8859_1,    NULL },
+    { "870",     iso_8859_2_to_ibm870,    ibm870_to_iso_8859_2,    NULL },
+    { "905",     iso_8859_3_to_ibm905,    ibm905_to_iso_8859_3,    NULL },
+    { "880",     iso_8859_5_to_ibm880,    ibm880_to_iso_8859_5,    NULL },
+    { "420",     iso_8859_6_to_ibm420,    ibm420_to_iso_8859_6,    NULL },
+    { "875",     iso_8859_7_to_ibm875,    ibm875_to_iso_8859_7,    NULL },
+    { "424",     iso_8859_8_to_ibm424,    ibm424_to_iso_8859_8,    NULL },
+    { "1026",    iso_8859_9_to_ibm1026,   ibm1026_to_iso_8859_9,   NULL },
+    { "290",     jis_x0201_to_ibm290,     ibm290_to_jis_x0201,     NULL },
+    { "win37",   windows_1252_to_ibm037,  ibm037_to_windows_1252,  NULL },
+    { "win256",  windows_1252_to_ibm256,  ibm256_to_windows_1252,  NULL },
+    { "win273",  windows_1252_to_ibm273,  ibm273_to_windows_1252,  NULL },
+    { "win277",  windows_1252_to_ibm277,  ibm277_to_windows_1252,  NULL },
+    { "win278",  windows_1252_to_ibm278,  ibm278_to_windows_1252,  NULL },
+    { "win280",  windows_1252_to_ibm280,  ibm280_to_windows_1252,  NULL },
+    { "win284",  windows_1252_to_ibm284,  ibm284_to_windows_1252,  NULL },
+    { "win285",  windows_1252_to_ibm285,  ibm285_to_windows_1252,  NULL },
+    { "win297",  windows_1252_to_ibm297,  ibm297_to_windows_1252,  NULL },
+    { "win500",  windows_1252_to_ibm500,  ibm500_to_windows_1252,  NULL },
+    { "win871",  windows_1252_to_ibm871,  ibm871_to_windows_1252,  NULL },
+    { "win870",  windows_1250_to_ibm870,  ibm870_to_windows_1250,  NULL },
+    { "win905",  windows_1254_to_ibm905,  ibm905_to_windows_1254,  NULL },
+    { "win880",  windows_1251_to_ibm880,  ibm880_to_windows_1251,  NULL },
+    { "win420",  windows_1256_to_ibm420,  ibm420_to_windows_1256,  NULL },
+    { "win875",  windows_1253_to_ibm875,  ibm875_to_windows_1253,  NULL },
+    { "win424",  windows_1255_to_ibm424,  ibm424_to_windows_1255,  NULL },
+    { "win1026", windows_1254_to_ibm1026, ibm1026_to_windows_1254, NULL },
+    { NULL,      NULL,                    NULL,                    NULL }
     // clang-format on
 };

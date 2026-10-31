@@ -7,8 +7,14 @@ include(GNUInstallDirs)
 find_package(OpenSSL)
 
 if (NOT WIN32)
-    # For now, assume Windows users don't want curses build
+    # For now, assume Windows users don't want curses build.
+    # add_wch/setcchar are provided by libncursesw on Linux. macOS system
+    # curses exports those symbols from libncurses, and FindCurses looks
+    # only for libncursesw when CURSES_NEED_WIDE is set.
     set(CURSES_NEED_NCURSES TRUE)
+    if (NOT APPLE)
+        set(CURSES_NEED_WIDE TRUE)
+    endif()
     find_package(Curses REQUIRED)
 endif()
 
@@ -22,6 +28,17 @@ check_include_file("sys/types.h" HAVE_SYS_TYPES_H)
 check_include_file("sys/wait.h" HAVE_SYS_WAIT_H)
 check_include_file("termcap.h" HAVE_TERMCAP_H)
 check_include_file("unistd.h" HAVE_UNISTD_H)
+
+# FindCurses reports ncursesw/ncurses.h as CURSES_HAVE_NCURSES_NCURSES_H.
+# cursesterm includes <ncurses/ncurses.h> for that macro. Where that path
+# does not exist, use the plain ncurses.h (same wide-capable header on
+# Debian/Ubuntu) so the build still compiles against libncursesw.
+if (CURSES_NEED_WIDE AND NOT EXISTS "${CURSES_INCLUDE_PATH}/ncurses/ncurses.h")
+    unset(CURSES_HAVE_NCURSES_NCURSES_H)
+    if (EXISTS "${CURSES_INCLUDE_PATH}/ncurses.h")
+        set(CURSES_HAVE_NCURSES_H "${CURSES_INCLUDE_PATH}/ncurses.h")
+    endif()
+endif()
 
 configure_file(config-cmake.h.in config.h @ONLY)
 
