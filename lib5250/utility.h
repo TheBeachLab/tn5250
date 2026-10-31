@@ -22,6 +22,8 @@
 #ifndef UTILITY_H
 #define UTILITY_H
 
+#include <wchar.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -58,6 +60,7 @@ struct _Tn5250CharMap {
     const char* name;
     const unsigned char* to_remote_map;
     const unsigned char* to_local_map;
+    const wchar_t* to_local_map_wc;
 };
 
 typedef struct _Tn5250CharMap Tn5250CharMap;
@@ -80,6 +83,7 @@ int tn5250_daemon(int nochdir, int noclose, int ignsigcld);
 
 Tn5250Char tn5250_char_map_to_remote(Tn5250CharMap* This, Tn5250Char ascii);
 Tn5250Char tn5250_char_map_to_local(Tn5250CharMap* This, Tn5250Char ebcdic);
+wchar_t tn5250_char_map_to_local_wc(Tn5250CharMap* This, Tn5250Char ebcdic);
 
 int tn5250_char_map_printable_p(Tn5250CharMap* This, Tn5250Char data);
 int tn5250_char_map_attribute_p(Tn5250CharMap* This, Tn5250Char data);

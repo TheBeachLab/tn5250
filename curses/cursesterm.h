@@ -22,6 +22,11 @@
 #ifndef CURSESTERM_H
 #define CURSESTERM_H
 
+/* Enable wide-character support in ncurses (cchar_t, add_wch, setcchar) */
+#ifndef _XOPEN_SOURCE_EXTENDED
+#define _XOPEN_SOURCE_EXTENDED
+#endif
+
 #if defined(HAVE_NCURSES_NCURSES_H)
 #include <ncurses/ncurses.h>
 #elif defined(HAVE_NCURSES_H)
