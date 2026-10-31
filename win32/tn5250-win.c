@@ -241,7 +241,7 @@ static void usage(void) {
         "position\n"
         "\t+/-version 		Display the version of the emulator and exit\n"
         "\t+/-pcspeaker 		Play beeps through the PC speaker\n"
-        "\tmap=NAME 		Character map (default is '37')\n"
+        "\tmap=NAME 		Character map (default is '1145')\n"
         "\tbeepfile=FILE 		Filename of a .wav file to play for "
         "beeps\n"
         "\tcopymode=MODE 		Copy to clipboard mode: 'bitmap', "
