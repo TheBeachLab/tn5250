@@ -25,6 +25,10 @@
 #include <sys/filio.h>
 #endif
 
+#ifndef _WIN32
+#include <netinet/tcp.h>
+#endif
+
 #ifdef accept
 #undef accept
 #endif
@@ -305,6 +309,68 @@ int tn5250_telnet_stream_init(Tn5250Stream* This) {
     return 0; /* Ok */
 }
 
+/* TCP keepalive tuning (seconds).  Keeps an idle 5250 session alive
+ * through NAT/firewall idle timeouts: the host may sit behind a NAT that
+ * drops idle TCP flows after a few minutes, and without keepalive an idle
+ * session dies silently. */
+#define TN5250_KEEPALIVE_IDLE  60
+#define TN5250_KEEPALIVE_INTVL 15
+#define TN5250_KEEPALIVE_CNT   4
+
+/****i* lib5250/telnet_stream_set_keepalive
+ * NAME
+ *    telnet_stream_set_keepalive
+ * SYNOPSIS
+ *    telnet_stream_set_keepalive (sockfd);
+ * DESCRIPTION
+ *    Enable TCP keepalive on a connected socket.  Best-effort: any
+ *    setsockopt failure is logged and ignored, since a missing keepalive
+ *    must not abort an otherwise-working connection.
+ *****/
+static void telnet_stream_set_keepalive(SOCKET_TYPE sockfd) {
+    int on = 1;
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&on,
+                   sizeof(on)) != 0) {
+        TN5250_LOG(("telnet: SO_KEEPALIVE failed, errno=%d\n", errno));
+        return;
+    }
+
+#ifdef TCP_KEEPALIVE /* macOS: idle seconds before the first probe */
+    {
+        int idle = TN5250_KEEPALIVE_IDLE;
+        if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPALIVE, (const char*)&idle,
+                       sizeof(idle)) != 0)
+            TN5250_LOG(("telnet: TCP_KEEPALIVE failed, errno=%d\n", errno));
+    }
+#elif defined(TCP_KEEPIDLE) /* Linux: idle seconds before the first probe */
+    {
+        int idle = TN5250_KEEPALIVE_IDLE;
+        if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, (const char*)&idle,
+                       sizeof(idle)) != 0)
+            TN5250_LOG(("telnet: TCP_KEEPIDLE failed, errno=%d\n", errno));
+    }
+#endif
+
+#ifdef TCP_KEEPINTVL
+    {
+        int intvl = TN5250_KEEPALIVE_INTVL;
+        if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, (const char*)&intvl,
+                       sizeof(intvl)) != 0)
+            TN5250_LOG(("telnet: TCP_KEEPINTVL failed, errno=%d\n", errno));
+    }
+#endif
+
+#ifdef TCP_KEEPCNT
+    {
+        int cnt = TN5250_KEEPALIVE_CNT;
+        if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, (const char*)&cnt,
+                       sizeof(cnt)) != 0)
+            TN5250_LOG(("telnet: TCP_KEEPCNT failed, errno=%d\n", errno));
+    }
+#endif
+}
+
 /****i* lib5250/telnet_stream_connect
  * NAME
  *    telnet_stream_connect
@@ -389,6 +455,10 @@ static int telnet_stream_connect(Tn5250Stream* This, const char* to) {
         _tn5250_set_error(TN5250_ERROR_ERRNO, LAST_ERROR);
         return LAST_ERROR;
     }
+
+    /* Keep idle sessions alive through NAT/firewall idle timeouts. */
+    telnet_stream_set_keepalive(This->sockfd);
+
     /* Set socket to non-blocking mode. */
 #ifdef FIONBIO
     TN5250_LOG(("Non-Blocking\n"));
