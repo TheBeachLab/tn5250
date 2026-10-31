@@ -170,7 +170,7 @@ int tn5250_display_config(Tn5250Display* This, Tn5250Config* config) {
         tn5250_char_map_destroy(This->map);
     }
     if ((v = tn5250_config_get(config, "map")) == NULL) {
-        tn5250_config_set(config, "map", "37");
+        tn5250_config_set(config, "map", "1145");
         v = tn5250_config_get(config, "map");
     }
 

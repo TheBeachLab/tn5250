@@ -195,7 +195,7 @@ Syntax:\n\
 #endif
     printf("\n\
 Options:\n\
-   map=NAME                Character map (default is '37'):");
+   map=NAME                Character map (default is '1145'):");
     m = tn5250_transmaps;
     while (m->name != NULL) {
         if (i % 5 == 0) {

@@ -8,6 +8,8 @@ Fork of [tn5250/tn5250](https://github.com/tn5250/tn5250) adding CCSID 1145 (Spa
 
 The upstream tn5250 only supports CCSID 284 which lacks the Euro sign. CCSID 1145 is identical to 284 except EBCDIC byte 0x9F maps to € instead of ¤.
 
+In this fork `map=1145` is the default for the interactive terminal, so you only need `map=` to pick a different CCSID. The printer tools (`lp5250d`, `scs2*`) still default to 37.
+
 > **Note:** The accented character fix ([setlocale issue](https://github.com/tn5250/tn5250/pull/56)) is now fixed upstream in commit [e1ce065](https://github.com/tn5250/tn5250/commit/e1ce0657105248afce6bf7d1fb7e433861864e1c).
 
 ## Pre-built Binary (macOS arm64)
