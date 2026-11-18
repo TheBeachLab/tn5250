@@ -59,15 +59,19 @@ struct _win32_color_map {
 };
 typedef struct _win32_color_map win32_color_map;
 
+/* Classic 5250 intensities. Turquoise is bright cyan and blue is blue;
+ * an older table had those two swapped, so "blue" fields drew as cyan.
+ * Green is a phosphor green rather than pure #00FF00, and yellow is amber,
+ * which is how a green-screen 5250 paints those attributes. */
 static win32_color_map colorlist[] = {
     // clang-format off
-    { "green",       RGB(0, 255, 0)     },
+    { "green",       RGB(96, 168, 96)   },
     { "white",       RGB(255, 255, 255) },
-    { "red",         RGB(255, 0, 0)     },
-    { "turquoise",   RGB(0, 128, 128)   },
-    { "yellow",      RGB(255, 255, 0)   },
-    { "pink",        RGB(255, 0, 255)   },
-    { "blue",        RGB(0, 255, 255)   },
+    { "red",         RGB(255, 64, 64)   },
+    { "turquoise",   RGB(0, 229, 229)   },
+    { "yellow",      RGB(255, 204, 0)   },
+    { "pink",        RGB(255, 102, 255) },
+    { "blue",        RGB(102, 102, 255) },
     { "black",       RGB(0, 0, 0)       },
     { "ruler_color", RGB(192, 0, 0)     },
     { NULL,          -1                 }
@@ -1367,13 +1371,16 @@ static void win32_terminal_font(Tn5250Terminal* This, const char* fontname,
     This->data->font_in_use.lfUnderline = FALSE;
     This->data->font_in_use.lfStrikeOut = FALSE;
     This->data->font_in_use.lfCharSet = DEFAULT_CHARSET;
-    This->data->font_in_use.lfOutPrecision = OUT_DEFAULT_PRECIS;
+    /* TrueType so lfWidth/lfHeight actually scale. Antialiased, not
+     * ClearType, so the glyphs stay solid like a 5250 terminal. */
+    This->data->font_in_use.lfOutPrecision =
+        This->data->resize_fonts ? OUT_TT_PRECIS : OUT_DEFAULT_PRECIS;
     This->data->font_in_use.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     This->data->font_in_use.lfQuality =
-        This->data->resize_fonts ? CLEARTYPE_QUALITY : DEFAULT_QUALITY;
+        This->data->resize_fonts ? ANTIALIASED_QUALITY : DEFAULT_QUALITY;
     This->data->font_in_use.lfPitchAndFamily = FIXED_PITCH | FF_DONTCARE;
     if (fontname == NULL || fontname[0] == '\0') {
-        fontname = "Courier New";
+        fontname = "Lucida Console";
     }
     strncpy(This->data->font_in_use.lfFaceName, fontname, LF_FACESIZE - 1);
     This->data->font_in_use.lfFaceName[LF_FACESIZE - 1] = '\0';
@@ -1384,6 +1391,36 @@ static void win32_terminal_font(Tn5250Terminal* This, const char* fontname,
 
     oldfont = SelectObject(hdc, This->data->font);
     DeleteObject(oldfont);
+
+    /* Lucida Console ships with Windows and scales. If that face is
+     * missing, Consolas then Courier New are the next monospace faces
+     * that still honor lfWidth and lfHeight. */
+    {
+        char got[LF_FACESIZE];
+        static const char* alt[] = { "Consolas", "Courier New", NULL };
+        int i;
+
+        GetTextFaceA(hdc, LF_FACESIZE, got);
+        if (lstrcmpiA(got, This->data->font_in_use.lfFaceName) != 0) {
+            for (i = 0; alt[i] != NULL; i++) {
+                HFONT trial;
+                HFONT prev;
+                strncpy(This->data->font_in_use.lfFaceName, alt[i],
+                        LF_FACESIZE - 1);
+                This->data->font_in_use.lfFaceName[LF_FACESIZE - 1] = '\0';
+                trial = CreateFontIndirect(&This->data->font_in_use);
+                prev = SelectObject(hdc, trial);
+                GetTextFaceA(hdc, LF_FACESIZE, got);
+                if (lstrcmpiA(got, alt[i]) == 0) {
+                    DeleteObject(prev);
+                    This->data->font = trial;
+                    break;
+                }
+                SelectObject(hdc, prev);
+                DeleteObject(trial);
+            }
+        }
+    }
 
     /* calculate the actual size of the font we selected */
 
