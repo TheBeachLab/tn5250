@@ -269,7 +269,7 @@ typedef struct _func_key {
     BYTE ext;
 } keystroke_to_msg;
 
-static keystroke_to_msg keydown2msg[] = {
+static const keystroke_to_msg keydown_defaults[] = {
     // clang-format off
     /*  KeyState    Win32 VirtKey    5250 key   ctx ext  */
     { VK_SHIFT,   VK_TAB,      K_BACKTAB,    0,  0  },
@@ -319,7 +319,7 @@ static keystroke_to_msg keydown2msg[] = {
     // clang-format on
 };
 
-static keystroke_to_msg keyup2msg[] = {
+static const keystroke_to_msg keyup_defaults[] = {
     // clang-format off
     /*  KeyState    Win32 VirtKey    5250 key     ctx ext  */
     { 0,       VK_CONTROL,  K_RESET,     0, 0 },
@@ -341,7 +341,7 @@ typedef struct _key_map {
     DWORD tn5250_key;
 } win32_key_map;
 
-static win32_key_map win_kb[] = {
+static const win32_key_map win_kb_defaults[] = {
     // clang-format off
     /* Win32 CharMsg       5250 key   */
     { 0x01,    K_ATTENTION  }, /* CTRL-A */
@@ -366,6 +366,344 @@ static win32_key_map win_kb[] = {
     { -1,      -1           },
     // clang-format on
 };
+
+#define WIN32_KEYDOWN_MAX 96
+#define WIN32_KEYUP_MAX   32
+#define WIN32_CHARKEY_MAX 64
+
+static keystroke_to_msg keydown2msg[WIN32_KEYDOWN_MAX];
+static keystroke_to_msg keyup2msg[WIN32_KEYUP_MAX];
+static win32_key_map win_kb[WIN32_CHARKEY_MAX];
+
+typedef char win32_keydown_fits_t
+    [(sizeof(keydown_defaults) <= sizeof(keydown2msg)) ? 1 : -1];
+typedef char
+    win32_keyup_fits_t[(sizeof(keyup_defaults) <= sizeof(keyup2msg)) ? 1 : -1];
+typedef char
+    win32_char_fits_t[(sizeof(win_kb_defaults) <= sizeof(win_kb)) ? 1 : -1];
+
+/* Set when Ctrl+/-/0 zoom handled the key, so releasing Ctrl is not
+ * also sent as Reset or Field+. */
+static int ctrl_zoom_used = 0;
+
+static int win32_key_eq(const char* a, const char* b) {
+    while (*a != '\0' && *b != '\0') {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca - 'A' + 'a');
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb - 'A' + 'a');
+        }
+        if (ca != cb) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+static int win32_key_action(const char* name, DWORD* out) {
+    static const struct {
+        const char* name;
+        DWORD key;
+    } actions[] = {
+        { "enter", K_ENTER },
+        { "field_exit", K_FIELDEXIT },
+        { "fieldexit", K_FIELDEXIT },
+        { "field_plus", K_FIELDPLUS },
+        { "fieldplus", K_FIELDPLUS },
+        { "field+", K_FIELDPLUS },
+        { "field_minus", K_FIELDMINUS },
+        { "fieldminus", K_FIELDMINUS },
+        { "field-", K_FIELDMINUS },
+        { "reset", K_RESET },
+        { "attn", K_ATTENTION },
+        { "attention", K_ATTENTION },
+        { "sysreq", K_SYSREQ },
+        { "erase_eof", K_ERASE },
+        { "eraseeof", K_ERASE },
+        { "erase_input", K_ERASE_INPUT },
+        { "eraseinput", K_ERASE_INPUT },
+        { "clear", K_CLEAR },
+        { "dup", K_DUPLICATE },
+        { "duplicate", K_DUPLICATE },
+        { "help", K_HELP },
+        { "roll_up", K_ROLLUP },
+        { "rollup", K_ROLLUP },
+        { "roll_down", K_ROLLDN },
+        { "rolldown", K_ROLLDN },
+        { "tab", K_TAB },
+        { "backtab", K_BACKTAB },
+        { "home", K_HOME },
+        { "insert", K_INSERT },
+        { "delete", K_DELETE },
+        { "backspace", K_BACKSPACE },
+        { "up", K_UP },
+        { "down", K_DOWN },
+        { "left", K_LEFT },
+        { "right", K_RIGHT },
+        { "newline", K_NEWLINE },
+        { "print", K_PRINT },
+        { "end", K_END },
+        { "paste", K_PASTE_TEXT },
+        { "copy", K_COPY_TEXT },
+        { NULL, 0 },
+    };
+    int i;
+    int n;
+
+    if (name[0] == 'f' || name[0] == 'F') {
+        n = 0;
+        for (i = 1; name[i] >= '0' && name[i] <= '9'; i++) {
+            n = n * 10 + (name[i] - '0');
+        }
+        if (name[i] == '\0' && n >= 1 && n <= 24) {
+            *out = (DWORD)(K_F1 + (n - 1));
+            return 1;
+        }
+    }
+    for (i = 0; actions[i].name != NULL; i++) {
+        if (win32_key_eq(name, actions[i].name)) {
+            *out = actions[i].key;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void win32_keymap_put_down(SHORT state, DWORD vk, DWORD func, BYTE ctx,
+                                  BYTE ext) {
+    int i;
+
+    for (i = 0; i < WIN32_KEYDOWN_MAX - 1; i++) {
+        if (keydown2msg[i].win32_key == (DWORD)-1) {
+            break;
+        }
+        if (keydown2msg[i].win32_key == vk &&
+            keydown2msg[i].keystate == state && keydown2msg[i].ctx == ctx &&
+            keydown2msg[i].ext == ext) {
+            keydown2msg[i].func_key = func;
+            return;
+        }
+    }
+    if (i >= WIN32_KEYDOWN_MAX - 1) {
+        return;
+    }
+    keydown2msg[i].keystate = state;
+    keydown2msg[i].win32_key = vk;
+    keydown2msg[i].func_key = func;
+    keydown2msg[i].ctx = ctx;
+    keydown2msg[i].ext = ext;
+    keydown2msg[i + 1].win32_key = (DWORD)-1;
+}
+
+static void win32_keymap_put_up(SHORT state, DWORD vk, DWORD func, BYTE ctx,
+                                BYTE ext) {
+    int i;
+
+    for (i = 0; i < WIN32_KEYUP_MAX - 1; i++) {
+        if (keyup2msg[i].win32_key == (DWORD)-1) {
+            break;
+        }
+        if (keyup2msg[i].win32_key == vk && keyup2msg[i].keystate == state &&
+            keyup2msg[i].ctx == ctx && keyup2msg[i].ext == ext) {
+            keyup2msg[i].func_key = func;
+            return;
+        }
+    }
+    if (i >= WIN32_KEYUP_MAX - 1) {
+        return;
+    }
+    keyup2msg[i].keystate = state;
+    keyup2msg[i].win32_key = vk;
+    keyup2msg[i].func_key = func;
+    keyup2msg[i].ctx = ctx;
+    keyup2msg[i].ext = ext;
+    keyup2msg[i + 1].win32_key = (DWORD)-1;
+}
+
+static void win32_keymap_put_char(DWORD ch, DWORD func) {
+    int i;
+
+    for (i = 0; i < WIN32_CHARKEY_MAX - 1; i++) {
+        if (win_kb[i].win32_key == (DWORD)-1) {
+            break;
+        }
+        if (win_kb[i].win32_key == ch) {
+            win_kb[i].tn5250_key = func;
+            return;
+        }
+    }
+    if (i >= WIN32_CHARKEY_MAX - 1) {
+        return;
+    }
+    win_kb[i].win32_key = ch;
+    win_kb[i].tn5250_key = func;
+    win_kb[i + 1].win32_key = (DWORD)-1;
+}
+
+/* key.<token>=<action> in tn5250rc. Unknown tokens are ignored.
+ * Ctrl+Plus, Ctrl+Minus and Ctrl+0 stay as font zoom. */
+static void win32_keymap_bind(const char* token, const char* action) {
+    DWORD func;
+    int n;
+    const char* p = token;
+    const char* q;
+    SHORT state = 0;
+    BYTE ctx = 0;
+
+    if (!win32_key_action(action, &func)) {
+        return;
+    }
+    if ((p[0] == 's' || p[0] == 'S') && (p[1] == 'h' || p[1] == 'H') &&
+        (p[2] == 'i' || p[2] == 'I') && (p[3] == 'f' || p[3] == 'F') &&
+        (p[4] == 't' || p[4] == 'T') && p[5] == '+') {
+        state = VK_SHIFT;
+        p += 6;
+    }
+    else if ((p[0] == 'a' || p[0] == 'A') && (p[1] == 'l' || p[1] == 'L') &&
+             (p[2] == 't' || p[2] == 'T') && p[3] == '+') {
+        ctx = 1;
+        p += 4;
+    }
+
+    if ((p[0] == 'f' || p[0] == 'F') && p[1] >= '1' && p[1] <= '9') {
+        n = 0;
+        q = p + 1;
+        while (*q >= '0' && *q <= '9') {
+            n = n * 10 + (*q - '0');
+            q++;
+        }
+        if (*q == '\0' && n >= 1 && n <= 12) {
+            win32_keymap_put_down(state, (DWORD)(VK_F1 + (n - 1)), func, ctx,
+                                  0);
+            return;
+        }
+    }
+    if (win32_key_eq(p, "enter")) {
+        win32_keymap_put_char(0x0d, func);
+        return;
+    }
+    if (win32_key_eq(p, "numpad_enter")) {
+        win32_keymap_put_down(0, VK_RETURN, func, 0, 1);
+        return;
+    }
+    if (win32_key_eq(p, "lctrl")) {
+        win32_keymap_put_up(0, VK_CONTROL, func, 0, 0);
+        return;
+    }
+    if (win32_key_eq(p, "rctrl")) {
+        win32_keymap_put_up(0, VK_CONTROL, func, 0, 1);
+        return;
+    }
+    if (win32_key_eq(p, "esc")) {
+        win32_keymap_put_char(0x1b, func);
+        return;
+    }
+    if (win32_key_eq(p, "end")) {
+        win32_keymap_put_down(state, VK_END, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "pause")) {
+        win32_keymap_put_down(state, VK_PAUSE, func, ctx, 0);
+        return;
+    }
+    if (win32_key_eq(p, "insert")) {
+        win32_keymap_put_down(state, VK_INSERT, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "delete")) {
+        win32_keymap_put_down(state, VK_DELETE, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "numpad_add")) {
+        win32_keymap_put_down(0, VK_ADD, func, 0, 0);
+        return;
+    }
+    if (win32_key_eq(p, "numpad_sub")) {
+        win32_keymap_put_down(0, VK_SUBTRACT, func, 0, 0);
+        return;
+    }
+    if (win32_key_eq(p, "pgdn")) {
+        win32_keymap_put_down(state, VK_NEXT, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "pgup")) {
+        win32_keymap_put_down(state, VK_PRIOR, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "tab")) {
+        if (state == VK_SHIFT) {
+            win32_keymap_put_down(VK_SHIFT, VK_TAB, func, 0, 0);
+        }
+        else {
+            win32_keymap_put_char(0x09, func);
+        }
+        return;
+    }
+    if (win32_key_eq(p, "home")) {
+        win32_keymap_put_down(state, VK_HOME, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "backspace")) {
+        win32_keymap_put_char(VK_BACK, func);
+        return;
+    }
+    if (win32_key_eq(p, "up")) {
+        win32_keymap_put_down(state, VK_UP, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "down")) {
+        win32_keymap_put_down(state, VK_DOWN, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "left")) {
+        win32_keymap_put_down(state, VK_LEFT, func, ctx, 1);
+        return;
+    }
+    if (win32_key_eq(p, "right")) {
+        win32_keymap_put_down(state, VK_RIGHT, func, ctx, 1);
+        return;
+    }
+}
+
+static void win32_keymap_load(Tn5250Config* config) {
+    Tn5250ConfigStr* iter;
+    int i;
+
+    memset(keydown2msg, 0, sizeof(keydown2msg));
+    memset(keyup2msg, 0, sizeof(keyup2msg));
+    memset(win_kb, 0, sizeof(win_kb));
+    memcpy(keydown2msg, keydown_defaults, sizeof(keydown_defaults));
+    memcpy(keyup2msg, keyup_defaults, sizeof(keyup_defaults));
+    memcpy(win_kb, win_kb_defaults, sizeof(win_kb_defaults));
+    (void)sizeof(win32_keydown_fits_t);
+    (void)sizeof(win32_keyup_fits_t);
+    (void)sizeof(win32_char_fits_t);
+
+    if (config != NULL && tn5250_config_get_bool(config, "unix_sysreq")) {
+        for (i = 0; win_kb[i].win32_key != (DWORD)-1; i++) {
+            if (win_kb[i].win32_key == 0x03) {
+                win_kb[i].tn5250_key = K_SYSREQ;
+                break;
+            }
+        }
+    }
+    if (config == NULL || config->vars == NULL) {
+        return;
+    }
+    iter = config->vars;
+    do {
+        if (iter->name != NULL && iter->value != NULL &&
+            strncmp(iter->name, "key.", 4) == 0) {
+            win32_keymap_bind(iter->name + 4, iter->value);
+        }
+        iter = iter->next;
+    } while (iter != config->vars);
+}
 
 /****f* lib5250/tn5250_win32_terminal_new
  * NAME
@@ -464,6 +802,23 @@ Tn5250Terminal* tn5250_win32_terminal_new(HINSTANCE hInst, HINSTANCE hPrev,
     r->create_scrollbar = NULL;
     r->destroy_scrollbar = NULL;
     return r;
+}
+
+int tn5250_win32_terminal_quit_flag(Tn5250Terminal* This) {
+    if (This == NULL || This->data == NULL) {
+        return 0;
+    }
+    return This->data->quit_flag ? 1 : 0;
+}
+
+void tn5250_win32_terminal_disconnect(Tn5250Terminal* This) {
+    if (This == NULL || This->data == NULL) {
+        return;
+    }
+    if (This->conn_fd != -1 && This->data->hwndMain != NULL) {
+        WSAAsyncSelect(This->conn_fd, This->data->hwndMain, 0, 0);
+    }
+    This->conn_fd = -1;
 }
 
 #define WIN32_KEEPALIVE_TIMER 1
@@ -720,14 +1075,17 @@ static int win32_zoom_key(HWND hwnd, WPARAM key) {
     }
     if (key == VK_OEM_PLUS || key == VK_ADD) {
         win32_zoom_by(hwnd, 11, 10);
+        ctrl_zoom_used = 1;
         return 1;
     }
     if (key == VK_OEM_MINUS || key == VK_SUBTRACT) {
         win32_zoom_by(hwnd, 10, 11);
+        ctrl_zoom_used = 1;
         return 1;
     }
     if (key == '0' || key == VK_NUMPAD0) {
         win32_zoom_reset(hwnd);
+        ctrl_zoom_used = 1;
         return 1;
     }
     return 0;
@@ -745,6 +1103,9 @@ static int win32_zoom_key(HWND hwnd, WPARAM key) {
  *****/
 static void win32_terminal_init(Tn5250Terminal* This) {
     int i = 0, c, s;
+
+    /* Before the window exists, so a key cannot see an empty table. */
+    win32_keymap_load(This->data->config);
     struct timeval tv;
     char* str;
     HDC hdc;
@@ -848,18 +1209,7 @@ static void win32_terminal_init(Tn5250Terminal* This) {
             }
         }
 
-        /* FIXME: This opt should not exist when we have full keyboard mapping
-         */
-        if (tn5250_config_get_bool(This->data->config, "unix_sysreq")) {
-            i = 0;
-            while (win_kb[i].win32_key != -1) {
-                if (win_kb[i].win32_key == 0x03) {
-                    win_kb[i].tn5250_key = K_SYSREQ;
-                    break;
-                }
-                i++;
-            }
-        }
+        /* unix_sysreq and key.* lines are applied in win32_keymap_load. */
 
         /* set color list for black on white */
 
@@ -1004,8 +1354,6 @@ static void win32_terminal_init(Tn5250Terminal* This) {
     if (tn5250_config_get(This->data->config, "numlock")) {
         setNumLock(tn5250_config_get_bool(This->data->config, "numlock"));
     }
-
-    /* FIXME: This might be a nice place to load the keyboard map */
 }
 
 static int setNumLock(int state) {
@@ -2521,6 +2869,10 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
     case WM_SYSKEYUP:
     case WM_KEYUP:
         ext = (HIWORD(lParam) & 0x0100) >> 8;
+        if (wParam == VK_CONTROL && ctrl_zoom_used) {
+            ctrl_zoom_used = 0;
+            return 0;
+        }
         GetKeyboardState(ks);
         ks[0] = 0xff; /* so that keystate=0 always works. */
         x = 0;
@@ -2542,7 +2894,8 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
         if (win32_zoom_key(hwnd, wParam)) {
             return 0;
         }
-        ctx = HIWORD(lParam) & 0x2000;
+        /* ctx in the table is 1 when Alt is down. The raw bit is 0x2000. */
+        ctx = (HIWORD(lParam) & 0x2000) ? 1 : 0;
         ext = (HIWORD(lParam) & 0x0100) >> 8;
         GetKeyboardState(ks);
         ks[0] = 0xff; /* so that keystate=0 always works. */

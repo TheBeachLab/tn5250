@@ -193,6 +193,80 @@ Set
 .B resize_fonts=0
 for a fixed font and a window that does not scale.
 .TP
+.BI devname_suffix= 1
+Windows only. When
+.B env.DEVNAME
+is set and that device is already in use, try the name, then the name
+plus
+.BR A ,
+.BR B ,
+and so on through
+.BR Z
+(at most 10 characters, matching an iSeries Access name written with a
+trailing star). A trailing
+.B *
+on
+.B env.DEVNAME
+turns this on as well. The socket closing before any 5250 record is
+treated as "name in use". A failure to connect does not try another name.
+.TP
+.BI key. TOKEN = ACTION
+Windows only. Overrides one key in the built-in map. Tokens include
+.BR enter ,
+.BR numpad_enter ,
+.BR lctrl ,
+.BR rctrl ,
+.BR esc ,
+.BR shift+esc ,
+.BR end ,
+.BR pause ,
+.BR shift+insert ,
+.BR alt+f1 ,
+.BR numpad_add ,
+.BR numpad_sub ,
+.BR pgdn ,
+.BR pgup ,
+.BR f1
+through
+.BR f12 ,
+.BR shift+f1
+through
+.BR shift+f12 ,
+.BR tab ,
+.BR shift+tab ,
+.BR home ,
+.BR insert ,
+.BR delete ,
+.BR backspace ,
+and the arrow keys. Actions include
+.BR enter ,
+.BR field_exit ,
+.BR field_plus ,
+.BR field_minus ,
+.BR reset ,
+.BR attn ,
+.BR sysreq ,
+.BR erase_eof ,
+.BR erase_input ,
+.BR clear ,
+.BR dup ,
+.BR help ,
+.BR roll_up ,
+.BR roll_down ,
+.BR tab ,
+.BR backtab ,
+.B f1
+through
+.BR f24 ,
+and the cursor keys.
+.B erase_eof
+clears from the cursor to the end of the field.
+.B clear
+sends the Clear AID.
+.B dup
+is the 5250 Dup key. Ctrl+Plus, Ctrl+Minus and Ctrl+0 still zoom the
+font and are not sent to the host.
+.TP
 .BI green= COLOR
 .TQ
 .BI white= COLOR
@@ -249,7 +323,21 @@ default command is
 Set the name of the host print transform description to use on the
 AS/400.  This is the same as the MFRTYPMDL parameter on the CRTDEVPRT
 command.  See the CL Reference or the online help for a list of valid
-values.
+values. When this is set, the Windows printer program writes the
+transformed bytes through instead of parsing them as SCS.
+.TP
+.BI pdf_printer= NAME
+Windows only. Draw each print job on this Windows printer. The usual
+value is
+.B "Microsoft Print to PDF" ,
+which asks where to save the PDF. Used instead of
+.BR outputcommand .
+.TP
+.BI pdf_dir= DIRECTORY
+Windows only. Write each job as a PDF file in
+.I DIRECTORY
+and open it. Used instead of
+.BR pdf_printer .
 .TP
 .BI env. VARIABLE = VALUE
 Set any other environment variables controlling the printer session.

@@ -110,6 +110,7 @@ Tn5250Session* tn5250_session_new() {
     This->config = NULL;
     This->stream = NULL;
     This->invited = 1;
+    This->got_display = 0;
     This->read_opcode = 0;
 
     This->handle_aidkey = tn5250_session_handle_aidkey;
@@ -256,6 +257,9 @@ static void tn5250_session_handle_receive(Tn5250Session* This) {
 
         TN5250_LOG(
             ("HandleReceive: cur_opcode = 0x%02X %d\n", cur_opcode, atn));
+
+        /* A 5250 record means the host accepted this device name. */
+        This->got_display = 1;
 
         switch (cur_opcode) {
         case TN5250_RECORD_OPCODE_PUT_GET:

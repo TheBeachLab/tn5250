@@ -98,6 +98,10 @@ The first window covers about 90% of the work area, so the 24×80 (or 27×132) c
 
 Idle sessions send TCP keepalive probes (60 seconds idle, then every 15 seconds; Windows uses `SIO_KEEPALIVE_VALS` because its default idle time is two hours) and a telnet NOP every 45 seconds. `telnet_keepalive=0` disables only the NOP.
 
+The Windows key map can be overridden from `tn5250rc` with `key.TOKEN=ACTION` lines (for example `key.end=erase_eof`, `key.pause=clear`, `key.shift+insert=dup`). Clear sends the Clear AID, Dup is the 5250 Dup key, and Erase EOF nulls the field from the cursor to its end. `key.erase_input` is available if you map it. Ctrl+Plus, Ctrl+Minus and Ctrl+0 still zoom and are not sent to the host.
+
+`devname_suffix=1`, or a trailing `*` on `env.DEVNAME`, retries a device name that is already in use as NAME, NAMEA, NAMEB, and so on, up to 10 characters. The next name is tried only when the host drops the socket before any 5250 screen.
+
 ### Cutting a release
 
 Tag the commit that should be built and push the tag:
@@ -107,7 +111,7 @@ git tag v0.19.1-windows.1
 git push origin v0.19.1-windows.1
 ```
 
-The `Windows release` workflow compiles the x64 GUI with the static C runtime (OpenSSL is not required for plain telnet) and uploads `tn5250-windows-x64.zip`. Use a hyphenated tag when the macOS zip must remain the asset behind `/releases/latest`.
+The `Windows release` workflow compiles the x64 GUI and `lp5250d.exe` with the static C runtime (OpenSSL is not required for plain telnet) and uploads `tn5250-windows-x64.zip`. Use a hyphenated tag when the macOS zip must remain the asset behind `/releases/latest`. `lp5250d.exe` is the 5250 printer session: `env.IBMMFRTYPMDL` turns on host print transform, `pdf_printer` draws the job on a Windows printer (for example Microsoft Print to PDF), and `pdf_dir` writes a PDF file and opens it. The program stays idle until something starts it.
 
 ## License
 

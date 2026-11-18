@@ -108,6 +108,10 @@ struct _Tn5250Session {
     struct _Tn5250Config* config;
     int read_opcode; /* Current read opcode. */
     int invited;
+    /* Set once the host has sent a 5250 record. Stays 0 when the
+     * socket closes during telnet setup, which is how a device name
+     * that is already in use is reported. */
+    int got_display;
 };
 
 typedef struct _Tn5250Session Tn5250Session;

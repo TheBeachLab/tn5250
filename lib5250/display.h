@@ -157,6 +157,8 @@ extern void tn5250_display_kf_field_exit(Tn5250Display* This);
 extern void tn5250_display_kf_field_minus(Tn5250Display* This);
 extern void tn5250_display_kf_field_plus(Tn5250Display* This);
 extern void tn5250_display_kf_dup(Tn5250Display* This);
+extern void tn5250_display_kf_erase_eof(Tn5250Display* This);
+extern void tn5250_display_kf_erase_input(Tn5250Display* This);
 extern void tn5250_display_kf_insert(Tn5250Display* This);
 extern void tn5250_display_kf_tab(Tn5250Display* This);
 extern void tn5250_display_kf_backtab(Tn5250Display* This);
