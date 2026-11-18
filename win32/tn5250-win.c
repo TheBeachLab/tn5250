@@ -142,7 +142,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
     }
 
     if (tn5250_config_get(config, "font_80") == NULL) {
-        tn5250_config_set(config, "font_80", "Courier New");
+        tn5250_config_set(config, "font_80", "Lucida Console");
     }
 
 #ifndef NDEBUG

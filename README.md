@@ -92,6 +92,8 @@ tn5250 map=1145 env.TERM=IBM-3179-2 host:port
 
 On Windows the same options can live in `tn5250rc` next to `tn5250.exe` (`host=`, `map=`, `env.TERM=`). `map` defaults to 1145 and `env.TERM` defaults to `IBM-3179-2`.
 
+The window uses Lucida Console (Consolas, then Courier New, if that face is missing). It is an outline font, so it still scales with the window. Colors follow a 5250 screen: phosphor green, white, amber yellow, turquoise, red, blue, and pink on black. Override any of them with `green=#RRGGBB` and the other color names in `tn5250rc`.
+
 The first window covers about 90% of the work area, so the 24×80 (or 27×132) characters are large. Dragging a border scales the font to fill the window. The grid stays exactly 24×80 or 27×132; only the cells change size. Ctrl and numpad + / − zoom, and Ctrl+0 returns to the large default. The rectangle is stored in `%APPDATA%\tn5250\ui.ini`. `resize_fonts=0` turns this off.
 
 Idle sessions send TCP keepalive probes (60 seconds idle, then every 15 seconds; Windows uses `SIO_KEEPALIVE_VALS` because its default idle time is two hours) and a telnet NOP every 45 seconds. `telnet_keepalive=0` disables only the NOP.
