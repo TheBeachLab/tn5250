@@ -760,10 +760,12 @@ static void curses_terminal_update(Tn5250Terminal* This,
                     if (c > 0xFF) {
                         cchar_t cc;
                         wchar_t wstr[2] = { c, L'\0' };
-                        setcchar(&cc, wstr, (curs_attr & A_ATTRIBUTES) & ~A_COLOR,
+                        setcchar(&cc, wstr,
+                                 (curs_attr & A_ATTRIBUTES) & ~A_COLOR,
                                  (short)PAIR_NUMBER(curs_attr), NULL);
                         add_wch(&cc);
-                    } else {
+                    }
+                    else {
                         addch((chtype)(c | curs_attr));
                     }
                 }
@@ -881,7 +883,20 @@ static int curses_terminal_waitevent(Tn5250Terminal* This) {
         sm = This->conn_fd + 1;
     }
 
-    select(sm, &fdr, NULL, NULL, NULL);
+    {
+        struct timeval tv;
+        int sel;
+        tv.tv_sec = TN5250_KEEPALIVE_PULSE_SEC;
+        tv.tv_usec = 0;
+        sel = select(sm, &fdr, NULL, NULL, &tv);
+        if (sel < 0) {
+            return 0;
+        }
+        if (sel == 0) {
+            tn5250_stream_keepalive_pulse();
+            return 0;
+        }
+    }
 
     if (FD_ISSET(0, &fdr)) {
         result |= TN5250_TERMINAL_EVENT_KEY;

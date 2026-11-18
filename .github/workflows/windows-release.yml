@@ -1,0 +1,48 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >-
+          cmake -B build -S .
+          -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter tn5250.exe build |
+            Where-Object { $_.FullName -match '\\Release\\' } |
+            Select-Object -First 1
+          if (-not $exe) {
+            throw "tn5250.exe was not produced"
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $exe.FullName dist\tn5250.exe
+          Copy-Item README.md dist\README.md
+          Copy-Item COPYING dist\COPYING
+          Compress-Archive -Path dist\* -DestinationPath tn5250-windows-x64.zip -Force
+          Get-Item tn5250-windows-x64.zip | Format-List FullName, Length
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tn5250-windows-x64.zip
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

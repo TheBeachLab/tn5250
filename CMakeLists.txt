@@ -1,10 +1,16 @@
 cmake_minimum_required(VERSION 3.12)
-project(tn5250 LANGUAGES C VERSION 0.19.0)
+project(tn5250 LANGUAGES C VERSION 0.19.1)
 
 include(CheckIncludeFile)
 include(GNUInstallDirs)
 
 find_package(OpenSSL)
+
+# A Windows zip should run without a separate Visual C++ redistributable.
+# Skip this when OpenSSL is linked: its import libs expect the DLL CRT.
+if (MSVC AND NOT OPENSSL_FOUND)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 if (NOT WIN32)
     # For now, assume Windows users don't want curses build.

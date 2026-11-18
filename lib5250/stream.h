@@ -88,6 +88,15 @@ tn5250_stream_getenv(Tn5250Stream* This, const char* name);
 #define tn5250_stream_record_count(This) ((This)->record_count)
 extern int tn5250_stream_socket_handle(Tn5250Stream* This);
 
+/* How often an idle session sends a telnet NOP. Well under a 5 minute
+ * NAT idle timeout, and independent of the 60 s TCP keepalive probes. */
+#define TN5250_KEEPALIVE_PULSE_SEC 45
+
+/* Application keepalive. Armed once the session is up. pulse() sends a
+ * telnet IAC NOP unless telnet_keepalive is explicitly turned off. */
+extern void tn5250_stream_keepalive_arm(Tn5250Stream* This);
+extern void tn5250_stream_keepalive_pulse(void);
+
 #ifdef __cplusplus
 }
 

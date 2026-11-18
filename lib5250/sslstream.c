@@ -562,6 +562,9 @@ static int ssl_stream_connect(Tn5250Stream* This, const char* to) {
         return errnum;
     }
 
+    /* Same TCP keepalive as the plain telnet stream (60 s / 15 s). */
+    tn5250_socket_set_keepalive(This->sockfd);
+
     TN5250_LOG(("Connected with SSL\n"));
     TN5250_LOG(("Using %s cipher with a %d bit secret key\n",
                 SSL_get_cipher_name(This->ssl_handle),
