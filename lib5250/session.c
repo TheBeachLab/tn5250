@@ -196,6 +196,8 @@ void tn5250_session_set_stream(Tn5250Session* This, Tn5250Stream* newstream) {
 void tn5250_session_main_loop(Tn5250Session* This) {
     int r;
 
+    tn5250_stream_keepalive_arm(This->stream);
+
     while (1) {
         r = tn5250_display_waitevent(This->display);
         if ((r & TN5250_TERMINAL_EVENT_QUIT) != 0) {

@@ -82,6 +82,31 @@ luit -encoding ISO-8859-15 tn5250 map=1145 env.TERM=IBM-3179-2 your.as400.host:2
 | IBM-3477-FC | 27x132 | Wide mode color |
 | IBM-3477-FG | 27x132 | Wide mode monochrome |
 
+## Windows build
+
+The Windows program is the existing GUI (`win32/tn5250-win.c`), a normal window rather than a console. GitHub Actions builds it on every `v*` tag and attaches `tn5250-windows-x64.zip` to that GitHub Release. A tag that contains a hyphen (for example `v0.19.1-windows.1`) is published as a pre-release, so it does not replace the macOS asset on `/releases/latest`.
+
+```text
+tn5250 map=1145 env.TERM=IBM-3179-2 host:port
+```
+
+On Windows the same options can live in `tn5250rc` next to `tn5250.exe` (`host=`, `map=`, `env.TERM=`). `map` defaults to 1145 and `env.TERM` defaults to `IBM-3179-2`.
+
+The first window covers about 90% of the work area, so the 24×80 (or 27×132) characters are large. Dragging a border scales the font to fill the window. The grid stays exactly 24×80 or 27×132; only the cells change size. Ctrl and numpad + / − zoom, and Ctrl+0 returns to the large default. The rectangle is stored in `%APPDATA%\tn5250\ui.ini`. `resize_fonts=0` turns this off.
+
+Idle sessions send TCP keepalive probes (60 seconds idle, then every 15 seconds; Windows uses `SIO_KEEPALIVE_VALS` because its default idle time is two hours) and a telnet NOP every 45 seconds. `telnet_keepalive=0` disables only the NOP.
+
+### Cutting a release
+
+Tag the commit that should be built and push the tag:
+
+```bash
+git tag v0.19.1-windows.1
+git push origin v0.19.1-windows.1
+```
+
+The `Windows release` workflow compiles the x64 GUI with the static C runtime (OpenSSL is not required for plain telnet) and uploads `tn5250-windows-x64.zip`. Use a hyphenated tag when the macOS zip must remain the asset behind `/releases/latest`.
+
 ## License
 
 GPL-2.0 (same as upstream tn5250)

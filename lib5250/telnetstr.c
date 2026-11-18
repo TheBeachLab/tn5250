@@ -27,6 +27,8 @@
 
 #ifndef _WIN32
 #include <netinet/tcp.h>
+#else
+#include <mstcpip.h>
 #endif
 
 #ifdef accept
@@ -309,34 +311,48 @@ int tn5250_telnet_stream_init(Tn5250Stream* This) {
     return 0; /* Ok */
 }
 
-/* TCP keepalive tuning (seconds).  Keeps an idle 5250 session alive
- * through NAT/firewall idle timeouts: the host may sit behind a NAT that
- * drops idle TCP flows after a few minutes, and without keepalive an idle
- * session dies silently. */
+/* TCP keepalive tuning. These are the timers from 832bcb9, which kept an
+ * idle session up for 40 minutes against the same class of NAT that drops
+ * a silent flow after a few minutes.
+ *
+ *   60 s idle before the first probe, then a probe every 15 s.
+ *   Linux/macOS also stop after 4 unanswered probes.
+ *
+ * Windows' default SO_KEEPALIVE idle time is 2 hours, which does not help
+ * a ~5 minute NAT timeout, so the same 60/15 values are applied there with
+ * SIO_KEEPALIVE_VALS. Failures are logged and ignored. */
 #define TN5250_KEEPALIVE_IDLE  60
 #define TN5250_KEEPALIVE_INTVL 15
 #define TN5250_KEEPALIVE_CNT   4
 
-/****i* lib5250/telnet_stream_set_keepalive
- * NAME
- *    telnet_stream_set_keepalive
- * SYNOPSIS
- *    telnet_stream_set_keepalive (sockfd);
- * DESCRIPTION
- *    Enable TCP keepalive on a connected socket.  Best-effort: any
- *    setsockopt failure is logged and ignored, since a missing keepalive
- *    must not abort an otherwise-working connection.
- *****/
-static void telnet_stream_set_keepalive(SOCKET_TYPE sockfd) {
+/* Telnet IAC NOP (RFC 854). Sent on top of the TCP probes because some
+ * middleboxes ignore keepalive ACKs that carry no payload. */
+#define TN5250_TELNET_NOP 241
+
+void tn5250_socket_set_keepalive(SOCKET_TYPE sockfd) {
     int on = 1;
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (const char*)&on,
                    sizeof(on)) != 0) {
-        TN5250_LOG(("telnet: SO_KEEPALIVE failed, errno=%d\n", errno));
+        TN5250_LOG(("telnet: SO_KEEPALIVE failed, err=%d\n", LAST_ERROR));
         return;
     }
 
-#ifdef TCP_KEEPALIVE /* macOS: idle seconds before the first probe */
+#ifdef _WIN32
+    {
+        struct tcp_keepalive ka;
+        DWORD returned = 0;
+        ka.onoff = 1;
+        ka.keepalivetime = TN5250_KEEPALIVE_IDLE * 1000UL;
+        ka.keepaliveinterval = TN5250_KEEPALIVE_INTVL * 1000UL;
+        if (WSAIoctl((SOCKET)sockfd, SIO_KEEPALIVE_VALS, &ka, sizeof(ka), NULL,
+                     0, &returned, NULL, NULL) != 0) {
+            TN5250_LOG(
+                ("telnet: SIO_KEEPALIVE_VALS failed, wsa=%d\n", LAST_ERROR));
+        }
+    }
+#else
+#ifdef TCP_KEEPALIVE        /* macOS: idle seconds before the first probe */
     {
         int idle = TN5250_KEEPALIVE_IDLE;
         if (setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPALIVE, (const char*)&idle,
@@ -369,6 +385,7 @@ static void telnet_stream_set_keepalive(SOCKET_TYPE sockfd) {
             TN5250_LOG(("telnet: TCP_KEEPCNT failed, errno=%d\n", errno));
     }
 #endif
+#endif /* _WIN32 */
 }
 
 /****i* lib5250/telnet_stream_connect
@@ -457,7 +474,7 @@ static int telnet_stream_connect(Tn5250Stream* This, const char* to) {
     }
 
     /* Keep idle sessions alive through NAT/firewall idle timeouts. */
-    telnet_stream_set_keepalive(This->sockfd);
+    tn5250_socket_set_keepalive(This->sockfd);
 
     /* Set socket to non-blocking mode. */
 #ifdef FIONBIO
@@ -1046,4 +1063,38 @@ static void telnet_stream_escape(Tn5250Buffer* in) {
     }
     tn5250_buffer_free(in);
     memcpy(in, &out, sizeof(Tn5250Buffer));
+}
+
+static Tn5250Stream* keepalive_stream = NULL;
+
+void tn5250_stream_keepalive_arm(Tn5250Stream* This) {
+    keepalive_stream = This;
+}
+
+void tn5250_stream_keepalive_pulse(void) {
+    unsigned char nop[2];
+    const char* setting;
+    Tn5250Stream* This = keepalive_stream;
+
+    if (This == NULL || WAS_INVAL_SOCK(This->sockfd)) {
+        return;
+    }
+    if (This->config != NULL) {
+        setting = tn5250_config_get(This->config, "telnet_keepalive");
+        if (setting != NULL &&
+            !tn5250_config_get_bool(This->config, "telnet_keepalive")) {
+            return;
+        }
+    }
+
+    nop[0] = (unsigned char)IAC;
+    nop[1] = (unsigned char)TN5250_TELNET_NOP;
+
+#ifdef HAVE_LIBSSL
+    if (This->ssl_handle != NULL) {
+        SSL_write(This->ssl_handle, nop, 2);
+        return;
+    }
+#endif
+    send(This->sockfd, (char*)nop, 2, 0);
 }

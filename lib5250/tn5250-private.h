@@ -118,6 +118,9 @@ typedef enum {
 
 void _tn5250_set_error(Tn5250ErrorType type, int code);
 
+/* SO_KEEPALIVE plus a 60s idle / 15s probe interval. Best-effort. */
+void tn5250_socket_set_keepalive(SOCKET_TYPE sockfd);
+
 /** Start of REALLY ugly network portability layer. **/
 
 #if defined(_WIN32)

@@ -62,11 +62,32 @@ BOOL CALLBACK ConnectDlgProc(HWND, UINT, WPARAM, LPARAM);
 int GetParams(HWND hDlg);
 int SetParams(HWND hDlg);
 
+/* Per-monitor DPI so a resized window scales real pixels, not a blurry
+ * bitmap. Called before any window exists. No embedded manifest: the
+ * linker already writes one, and a second RT_MANIFEST fails the link. */
+static void enable_per_monitor_dpi(void) {
+    typedef BOOL(WINAPI * SetCtx)(HANDLE);
+    HMODULE user32;
+    SetCtx set_ctx;
+
+    user32 = GetModuleHandleA("user32.dll");
+    if (user32 == NULL) {
+        return;
+    }
+    set_ctx = (SetCtx)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
+    if (set_ctx != NULL) {
+        /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */
+        set_ctx((HANDLE)(LONG_PTR)-4);
+    }
+}
+
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
     WORD winsock_ver;
     WSADATA wsadata;
     char** argv = NULL;
     int argc, x;
+
+    enable_per_monitor_dpi();
 
     argc = parse_cmdline(cmdline, NULL);
     if (argc > 0) {
@@ -434,7 +455,7 @@ int GetParams(HWND hDlg) {
 
     /* char map (CCSID) */
 
-    ccsid = 37;
+    ccsid = 1145;
     if (tn5250_config_get(config, "map")) {
         ccsid = atoi(tn5250_config_get(config, "map"));
     }
@@ -511,6 +532,74 @@ int GetParams(HWND hDlg) {
     return 0;
 }
 
+/* Write host= back into tn5250rc beside the exe so the next start does
+ * not ask again. Other lines in the file are left as they are. */
+static void remember_host_in_rc(const char* host) {
+    char module[MAX_PATH];
+    char path[MAX_PATH];
+    char tmp[MAX_PATH];
+    char line[512];
+    char* slash;
+    FILE* in;
+    FILE* out;
+    int replaced = 0;
+    size_t i;
+
+    if (host == NULL || host[0] == '\0') {
+        return;
+    }
+    for (i = 0; host[i] != '\0'; i++) {
+        if (host[i] == '\n' || host[i] == '\r') {
+            return;
+        }
+    }
+
+    if (GetModuleFileNameA(NULL, module, MAX_PATH) == 0) {
+        return;
+    }
+    slash = strrchr(module, '\\');
+    if (slash == NULL) {
+        return;
+    }
+    slash[1] = '\0';
+    if (strlen(module) + 16 >= MAX_PATH) {
+        return;
+    }
+    snprintf(path, sizeof(path), "%stn5250rc", module);
+    snprintf(tmp, sizeof(tmp), "%stn5250rc.tmp", module);
+
+    in = fopen(path, "r");
+    out = fopen(tmp, "w");
+    if (out == NULL) {
+        if (in != NULL) {
+            fclose(in);
+        }
+        return;
+    }
+    if (in != NULL) {
+        while (fgets(line, sizeof(line), in) != NULL) {
+            char* scan = line;
+            while (*scan == ' ' || *scan == '\t') {
+                scan++;
+            }
+            if (!replaced && strncmp(scan, "host=", 5) == 0) {
+                fprintf(out, "host=%s\n", host);
+                replaced = 1;
+            }
+            else {
+                fputs(line, out);
+            }
+        }
+        fclose(in);
+    }
+    if (!replaced) {
+        fprintf(out, "host=%s\n", host);
+    }
+    fclose(out);
+    remove(path);
+    rename(tmp, path);
+}
+
 /*
  * This is used by the "connect to" dialog box to set the configuration
  * options for the session.
@@ -549,6 +638,9 @@ int SetParams(HWND hDlg) {
     GetDlgItemText(hDlg, IDC_EDIT_HOST, work, MAX_HOST_SIZE);
     strcat(host, work);
     tn5250_config_set(config, "host", host);
+    if (work[0] != '\0') {
+        remember_host_in_rc(host);
+    }
 
     GetDlgItemText(hDlg, IDC_EDIT_DEVICE, device, MAX_DEVICE_SIZE + 1);
     tn5250_config_set(config, "env.DEVNAME", device);

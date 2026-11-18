@@ -25,6 +25,13 @@
 #define MIN(a, b)     (((a) < (b)) ? (a) : (b))
 #define MAX(a, b)     (((a) > (b)) ? (a) : (b))
 
+#ifndef WINVER
+#define WINVER 0x0601
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+
 #define _TN5250_TERMINAL_PRIVATE_DEFINED
 #include "tn5250-private.h"
 #include "resource.h"
@@ -425,7 +432,9 @@ Tn5250Terminal* tn5250_win32_terminal_new(HINSTANCE hInst, HINSTANCE hPrev,
     r->data->dont_auto_size = 0;
     r->data->unix_like_copy = 0;
     r->data->click_moves_caret = 0;
-    r->data->resize_fonts = 0;
+    /* On unless tn5250rc sets resize_fonts=0. Dragging the window
+     * scales the font; the 5250 grid itself does not change. */
+    r->data->resize_fonts = 1;
     r->data->local_print = 0;
     r->data->always_ask = 0;
     r->data->caret_style = CARETSTYLE_NOBLINK;
@@ -453,6 +462,273 @@ Tn5250Terminal* tn5250_win32_terminal_new(HINSTANCE hInst, HINSTANCE hPrev,
     return r;
 }
 
+#define WIN32_KEEPALIVE_TIMER 1
+#define WIN32_ZOOM_MIN_W      720
+#define WIN32_ZOOM_MIN_H      420
+
+/* Remembered window rectangle. Generic per-user file, not a session host. */
+static int win32_ui_ini(char* path, size_t pathlen) {
+    char appdata[MAX_PATH];
+    char dir[MAX_PATH];
+    DWORD n;
+
+    n = GetEnvironmentVariableA("APPDATA", appdata, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        return 0;
+    }
+    if (strlen(appdata) + 16 >= sizeof(dir)) {
+        return 0;
+    }
+    snprintf(dir, sizeof(dir), "%s\\tn5250", appdata);
+    CreateDirectoryA(dir, NULL);
+    if (strlen(dir) + 8 >= pathlen) {
+        return 0;
+    }
+    snprintf(path, pathlen, "%s\\ui.ini", dir);
+    return 1;
+}
+
+static int win32_ui_load(int* x, int* y, int* w, int* h, int* maximized) {
+    char path[MAX_PATH];
+    FILE* f;
+    char line[128];
+    int got = 0;
+    int v;
+
+    *maximized = 0;
+    if (!win32_ui_ini(path, sizeof(path))) {
+        return 0;
+    }
+    f = fopen(path, "r");
+    if (f == NULL) {
+        return 0;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (sscanf(line, "x=%d", &v) == 1) {
+            *x = v;
+            got |= 1;
+        }
+        else if (sscanf(line, "y=%d", &v) == 1) {
+            *y = v;
+            got |= 2;
+        }
+        else if (sscanf(line, "w=%d", &v) == 1) {
+            *w = v;
+            got |= 4;
+        }
+        else if (sscanf(line, "h=%d", &v) == 1) {
+            *h = v;
+            got |= 8;
+        }
+        else if (sscanf(line, "max=%d", &v) == 1) {
+            *maximized = v ? 1 : 0;
+        }
+    }
+    fclose(f);
+    return got == 15 && *w > 200 && *h > 150;
+}
+
+static int win32_placement_visible(int x, int y, int w, int h) {
+    RECT wr;
+    RECT inter;
+    RECT virt;
+
+    virt.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    virt.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    virt.right = virt.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    virt.bottom = virt.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    wr.left = x;
+    wr.top = y;
+    wr.right = x + w;
+    wr.bottom = y + h;
+    if (!IntersectRect(&inter, &wr, &virt)) {
+        return 0;
+    }
+    return (inter.right - inter.left) > 80 && (inter.bottom - inter.top) > 80;
+}
+
+static void win32_ui_save(HWND hwnd) {
+    char path[MAX_PATH];
+    FILE* f;
+    RECT wr;
+
+    if (globTerm == NULL || !globTerm->data->resize_fonts || hwnd == NULL) {
+        return;
+    }
+    if (!win32_ui_ini(path, sizeof(path))) {
+        return;
+    }
+    if (!GetWindowRect(hwnd, &wr)) {
+        return;
+    }
+    f = fopen(path, "w");
+    if (f == NULL) {
+        return;
+    }
+    fprintf(f, "x=%ld\ny=%ld\nw=%ld\nh=%ld\nmax=%d\n", (long)wr.left,
+            (long)wr.top, (long)(wr.right - wr.left),
+            (long)(wr.bottom - wr.top), IsZoomed(hwnd) ? 1 : 0);
+    fclose(f);
+}
+
+static void win32_work_area(HWND hwnd, RECT* work) {
+    HMONITOR mon;
+    MONITORINFO mi;
+
+    mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    mi.cbSize = sizeof(mi);
+    if (mon != NULL && GetMonitorInfo(mon, &mi)) {
+        *work = mi.rcWork;
+        return;
+    }
+    SystemParametersInfo(SPI_GETWORKAREA, 0, work, 0);
+}
+
+static void win32_default_window(int* x, int* y, int* w, int* h) {
+    RECT work;
+    int maxw;
+    int maxh;
+
+    SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+    maxw = (int)(work.right - work.left);
+    maxh = (int)(work.bottom - work.top);
+    *w = maxw * 9 / 10;
+    *h = maxh * 9 / 10;
+    if (*w < WIN32_ZOOM_MIN_W) {
+        *w = maxw;
+    }
+    if (*h < WIN32_ZOOM_MIN_H) {
+        *h = maxh;
+    }
+    *x = (int)work.left + (maxw - *w) / 2;
+    *y = (int)work.top + (maxh - *h) / 2;
+}
+
+static void win32_zoom_by(HWND hwnd, int numer, int denom) {
+    RECT wr;
+    RECT work;
+    int w;
+    int h;
+    int x;
+    int y;
+    int maxw;
+    int maxh;
+
+    if (globTerm == NULL || !globTerm->data->resize_fonts) {
+        return;
+    }
+    if (IsZoomed(hwnd)) {
+        ShowWindow(hwnd, SW_RESTORE);
+    }
+    if (!GetWindowRect(hwnd, &wr)) {
+        return;
+    }
+    w = (int)((wr.right - wr.left) * numer / denom);
+    h = (int)((wr.bottom - wr.top) * numer / denom);
+    win32_work_area(hwnd, &work);
+    maxw = (int)(work.right - work.left);
+    maxh = (int)(work.bottom - work.top);
+    if (w > maxw) {
+        w = maxw;
+    }
+    if (h > maxh) {
+        h = maxh;
+    }
+    if (w < WIN32_ZOOM_MIN_W && WIN32_ZOOM_MIN_W <= maxw) {
+        w = WIN32_ZOOM_MIN_W;
+    }
+    if (h < WIN32_ZOOM_MIN_H && WIN32_ZOOM_MIN_H <= maxh) {
+        h = WIN32_ZOOM_MIN_H;
+    }
+    x = (int)wr.left + ((int)(wr.right - wr.left) - w) / 2;
+    y = (int)wr.top + ((int)(wr.bottom - wr.top) - h) / 2;
+    if (x < work.left) {
+        x = (int)work.left;
+    }
+    if (y < work.top) {
+        y = (int)work.top;
+    }
+    if (x + w > work.right) {
+        x = (int)work.right - w;
+    }
+    if (y + h > work.bottom) {
+        y = (int)work.bottom - h;
+    }
+    SetWindowPos(hwnd, NULL, x, y, w, h, SWP_NOZORDER);
+    win32_ui_save(hwnd);
+}
+
+static void win32_zoom_reset(HWND hwnd) {
+    RECT work;
+    int maxw;
+    int maxh;
+    int w;
+    int h;
+    int x;
+    int y;
+
+    if (globTerm == NULL || !globTerm->data->resize_fonts) {
+        return;
+    }
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+    win32_work_area(hwnd, &work);
+    maxw = (int)(work.right - work.left);
+    maxh = (int)(work.bottom - work.top);
+    w = maxw * 9 / 10;
+    h = maxh * 9 / 10;
+    x = (int)work.left + (maxw - w) / 2;
+    y = (int)work.top + (maxh - h) / 2;
+    SetWindowPos(hwnd, NULL, x, y, w, h, SWP_NOZORDER);
+    win32_ui_save(hwnd);
+}
+
+/* Cell size follows the client area. Column and row counts stay the
+ * display's 24x80 or 27x132, plus the existing status line. */
+static void win32_refit_fonts(HWND hwnd) {
+    int c;
+    int r;
+
+    if (globTerm == NULL || !globTerm->data->resize_fonts) {
+        return;
+    }
+    win32_calc_default_font_size(hwnd, 80, RowsFor80Col + 1, &c, &r);
+    globTerm->data->font_80_h = r;
+    globTerm->data->font_80_w = c;
+    win32_calc_default_font_size(hwnd, 132, RowsFor132Col + 1, &c, &r);
+    globTerm->data->font_132_h = r;
+    globTerm->data->font_132_w = c;
+    globTerm->data->resized = 1;
+    if (globDisplay != NULL) {
+        win32_terminal_update(globTerm, globDisplay);
+    }
+}
+
+static int win32_zoom_key(HWND hwnd, WPARAM key) {
+    if (globTerm == NULL || !globTerm->data->resize_fonts) {
+        return 0;
+    }
+    if ((GetKeyState(VK_CONTROL) & 0x8000) == 0) {
+        return 0;
+    }
+    /* AltGr reports Ctrl+Alt. Do not treat that as zoom. */
+    if ((GetKeyState(VK_MENU) & 0x8000) != 0) {
+        return 0;
+    }
+    if (key == VK_OEM_PLUS || key == VK_ADD) {
+        win32_zoom_by(hwnd, 11, 10);
+        return 1;
+    }
+    if (key == VK_OEM_MINUS || key == VK_SUBTRACT) {
+        win32_zoom_by(hwnd, 10, 11);
+        return 1;
+    }
+    if (key == '0' || key == VK_NUMPAD0) {
+        win32_zoom_reset(hwnd);
+        return 1;
+    }
+    return 0;
+}
+
 /****i* lib5250/win32_terminal_init
  * NAME
  *    win32_terminal_init
@@ -475,6 +751,12 @@ static void win32_terminal_init(Tn5250Terminal* This) {
     int r, g, b;
     LOGBRUSH lb;
     const char* cs;
+    int win_x = CW_USEDEFAULT;
+    int win_y = CW_USEDEFAULT;
+    int win_w = CW_USEDEFAULT;
+    int win_h = CW_USEDEFAULT;
+    int saved_max = 0;
+    int show_cmd;
 
     WNDCLASSEX wndclass;
 
@@ -618,7 +900,13 @@ static void win32_terminal_init(Tn5250Terminal* This) {
     lb.lbHatch = 0;
     background_brush = CreateBrushIndirect(&lb);
 
-    if (tn5250_config_get(This->data->config, "host")) {
+    if (tn5250_config_get(This->data->config, "window_title")) {
+        const char* custom =
+            tn5250_config_get(This->data->config, "window_title");
+        title = malloc(strlen(custom) + 1);
+        strcpy(title, custom);
+    }
+    else if (tn5250_config_get(This->data->config, "host")) {
         if (tn5250_config_get(This->data->config, "env.DEVNAME")) {
             len = strlen(tn5250_config_get(This->data->config, "host"));
             len += strlen(tn5250_config_get(This->data->config, "env.DEVNAME"));
@@ -659,13 +947,30 @@ static void win32_terminal_init(Tn5250Terminal* This) {
     wndclass.hbrBackground = background_brush;
     RegisterClassEx(&wndclass);
 
+    /* Large text by default: a window that fills most of the work area,
+     * or the rectangle the user left last time. resize_fonts=0 keeps the
+     * old fixed-size window. */
+    if (This->data->resize_fonts) {
+        int sx, sy, sw, sh;
+        if (win32_ui_load(&sx, &sy, &sw, &sh, &saved_max) &&
+            win32_placement_visible(sx, sy, sw, sh)) {
+            win_x = sx;
+            win_y = sy;
+            win_w = sw;
+            win_h = sh;
+        }
+        else {
+            win32_default_window(&win_x, &win_y, &win_w, &win_h);
+            saved_max = 0;
+        }
+    }
+
     /* create our main window */
     This->data->hwndMain = CreateWindow(
         TN5250_WNDCLASS, title,
         This->data->resize_fonts ? WS_OVERLAPPEDWINDOW
                                  : (WS_OVERLAPPEDWINDOW & (~WS_MAXIMIZEBOX)),
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL,
-        This->data->hInst, NULL);
+        win_x, win_y, win_w, win_h, NULL, NULL, This->data->hInst, NULL);
     free(title);
 
     /* create a bitmap act as a screen buffer.  we will draw all of
@@ -683,8 +988,14 @@ static void win32_terminal_init(Tn5250Terminal* This) {
                             tn5250_config_get(This->data->config, "font_80"),
                             tn5250_config_get(This->data->config, "font_132"));
 
-    ShowWindow(This->data->hwndMain, This->data->show);
+    show_cmd = This->data->show;
+    if (saved_max) {
+        show_cmd = SW_SHOWMAXIMIZED;
+    }
+    ShowWindow(This->data->hwndMain, show_cmd);
     UpdateWindow(This->data->hwndMain);
+    SetTimer(This->data->hwndMain, WIN32_KEEPALIVE_TIMER,
+             TN5250_KEEPALIVE_PULSE_SEC * 1000, NULL);
 
     if (tn5250_config_get(This->data->config, "numlock")) {
         setNumLock(tn5250_config_get_bool(This->data->config, "numlock"));
@@ -975,11 +1286,31 @@ void win32_calc_default_font_size(HWND hwnd, int cols, int rows, int* w,
     TN5250_LOG(("WIN32: Client Rect  top=%d, bottom=%d, left=%d, right=%d\n",
                 cr.top, cr.bottom, cr.left, cr.right));
 
-    cli_height = (cr.bottom - cr.top) + 1;
-    cli_width = (cr.right - cr.left) + 1;
+    /* GetClientRect's bottom/right are exclusive. Dividing the real
+     * client size keeps every cell inside the window. */
+    cli_height = cr.bottom - cr.top;
+    cli_width = cr.right - cr.left;
+    if (rows < 1) {
+        rows = 1;
+    }
+    if (cols < 1) {
+        cols = 1;
+    }
+    if (cli_height < rows) {
+        cli_height = rows;
+    }
+    if (cli_width < cols) {
+        cli_width = cols;
+    }
 
     *h = cli_height / rows;
     *w = cli_width / cols;
+    if (*h < 1) {
+        *h = 1;
+    }
+    if (*w < 1) {
+        *w = 1;
+    }
 
     TN5250_LOG(
         ("WIN32: defaulting font size to height=%d, width=%d\n", *h, *w));
@@ -1019,20 +1350,33 @@ static void win32_terminal_font(Tn5250Terminal* This, const char* fontname,
     /* create a font using the size from our config data */
 
     hdc = GetDC(This->data->hwndMain);
-    This->data->font_in_use.lfHeight = fontheight;
+    /* Negative lfHeight is the character height, so a cell requested from
+     * the client area is not grown by internal leading. */
+    if (This->data->resize_fonts && fontheight > 0) {
+        This->data->font_in_use.lfHeight = -fontheight;
+    }
+    else {
+        This->data->font_in_use.lfHeight = fontheight;
+    }
     This->data->font_in_use.lfWidth = fontwidth;
     This->data->font_in_use.lfEscapement = 0;
     This->data->font_in_use.lfOrientation = 0;
-    This->data->font_in_use.lfWeight = FW_DONTCARE;
+    This->data->font_in_use.lfWeight =
+        This->data->resize_fonts ? FW_NORMAL : FW_DONTCARE;
     This->data->font_in_use.lfItalic = FALSE;
     This->data->font_in_use.lfUnderline = FALSE;
     This->data->font_in_use.lfStrikeOut = FALSE;
     This->data->font_in_use.lfCharSet = DEFAULT_CHARSET;
     This->data->font_in_use.lfOutPrecision = OUT_DEFAULT_PRECIS;
     This->data->font_in_use.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-    This->data->font_in_use.lfQuality = DEFAULT_QUALITY;
+    This->data->font_in_use.lfQuality =
+        This->data->resize_fonts ? CLEARTYPE_QUALITY : DEFAULT_QUALITY;
     This->data->font_in_use.lfPitchAndFamily = FIXED_PITCH | FF_DONTCARE;
-    strcpy(This->data->font_in_use.lfFaceName, fontname);
+    if (fontname == NULL || fontname[0] == '\0') {
+        fontname = "Courier New";
+    }
+    strncpy(This->data->font_in_use.lfFaceName, fontname, LF_FACESIZE - 1);
+    This->data->font_in_use.lfFaceName[LF_FACESIZE - 1] = '\0';
 
     This->data->font = CreateFontIndirect(&This->data->font_in_use);
 
@@ -1045,8 +1389,22 @@ static void win32_terminal_font(Tn5250Terminal* This, const char* fontname,
 
     GetTextMetrics(hdc, &tm);
     ReleaseDC(This->data->hwndMain, hdc);
-    This->data->font_height = tm.tmHeight + tm.tmExternalLeading;
-    This->data->font_width = tm.tmAveCharWidth;
+    if (This->data->resize_fonts && fontheight > 0 && fontwidth > 0) {
+        /* Draw on the cell grid we asked for, so the 24x80 (or 27x132)
+         * screen fills the window. Glyphs are clipped to the cell. */
+        This->data->font_height = fontheight;
+        This->data->font_width = fontwidth;
+    }
+    else {
+        This->data->font_height = tm.tmHeight + tm.tmExternalLeading;
+        This->data->font_width = tm.tmAveCharWidth;
+    }
+    if (This->data->font_height < 1) {
+        This->data->font_height = 16;
+    }
+    if (This->data->font_width < 1) {
+        This->data->font_width = 8;
+    }
 
     TN5250_LOG(("WIN32: Using font size:  Loaded with height=%d, width=%d, got "
                 "height=%d, width=%d\n",
@@ -1097,7 +1455,10 @@ static void win32_terminal_font(Tn5250Terminal* This, const char* fontname,
 
     /* make the system resize the window */
 
-    if ((!This->data->maximized) && (!This->data->dont_auto_size)) {
+    /* When the user owns the window size, do not snap the window back
+     * to the font. The font already matches the client area. */
+    if ((!This->data->maximized) && (!This->data->dont_auto_size) &&
+        (!This->data->resize_fonts)) {
         TN5250_LOG(
             ("WIN32: Re-sizing window to %d by %d\n", win_width, win_height));
         SetWindowPos(This->data->hwndMain, NULL, 0, 0, win_width, win_height,
@@ -1274,14 +1635,14 @@ static void win32_do_terminal_update(HDC hdc, Tn5250Terminal* This,
         This->data->last_height != tn5250_display_height(display) ||
         This->data->last_width != tn5250_display_width(display)) {
         if (tn5250_display_width(display) < 100) {
-            This->data->dont_auto_size = 0;
+            This->data->dont_auto_size = This->data->resize_fonts ? 1 : 0;
             win32_terminal_font(This, This->data->font_80,
                                 tn5250_display_width(display),
                                 tn5250_display_height(display) + 1,
                                 This->data->font_80_w, This->data->font_80_h);
         }
         else {
-            This->data->dont_auto_size = 0;
+            This->data->dont_auto_size = This->data->resize_fonts ? 1 : 0;
             win32_terminal_font(This, This->data->font_132,
                                 tn5250_display_width(display),
                                 tn5250_display_height(display) + 1,
@@ -1870,6 +2231,11 @@ void win32_terminal_choosefont(HWND hwnd) {
                 globTerm->data->font_132_w, globTerm->data->font_132_h);
             tn5250_config_set(globTerm->data->config, "font_132", fontName);
         }
+        if (globTerm->data->resize_fonts) {
+            /* Keep the face the user picked, but the cell size still
+             * comes from the window so the grid keeps filling it. */
+            win32_refit_fonts(hwnd);
+        }
     }
     ReleaseDC(hwnd, cf.hDC);
 }
@@ -1909,8 +2275,52 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
         break;
 
     case WM_DESTROY:
+        win32_ui_save(hwnd);
         PostQuitMessage(0);
         return 0;
+        break;
+
+    case WM_TIMER:
+        if (wParam == WIN32_KEEPALIVE_TIMER) {
+            tn5250_stream_keepalive_pulse();
+            return 0;
+        }
+        break;
+
+    case WM_EXITSIZEMOVE:
+        win32_ui_save(hwnd);
+        break;
+
+    case WM_DPICHANGED: {
+        RECT* suggested = (RECT*)lParam;
+        SetWindowPos(hwnd, NULL, suggested->left, suggested->top,
+                     suggested->right - suggested->left,
+                     suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        return 0;
+    }
+
+    case WM_GETMINMAXINFO:
+        if (globTerm != NULL && globTerm->data->resize_fonts) {
+            MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+            mmi->ptMinTrackSize.x = WIN32_ZOOM_MIN_W;
+            mmi->ptMinTrackSize.y = WIN32_ZOOM_MIN_H;
+            return 0;
+        }
+        break;
+
+    case WM_MOUSEWHEEL:
+        if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 &&
+            (GetKeyState(VK_MENU) & 0x8000) == 0 && globTerm != NULL &&
+            globTerm->data->resize_fonts) {
+            if ((short)HIWORD(wParam) > 0) {
+                win32_zoom_by(hwnd, 11, 10);
+            }
+            else {
+                win32_zoom_by(hwnd, 10, 11);
+            }
+            return 0;
+        }
         break;
 
     case WM_COMMAND:
@@ -1999,6 +2409,15 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
             InvalidateRect(hwnd, NULL, FALSE);
             UpdateWindow(hwnd);
             return 0;
+        case IDM_VIEW_ZOOM_IN:
+            win32_zoom_by(hwnd, 11, 10);
+            return 0;
+        case IDM_VIEW_ZOOM_OUT:
+            win32_zoom_by(hwnd, 10, 11);
+            return 0;
+        case IDM_VIEW_ZOOM_RESET:
+            win32_zoom_reset(hwnd);
+            return 0;
         case IDM_VIEW_FONT:
             win32_terminal_choosefont(hwnd);
             return 0;
@@ -2056,23 +2475,9 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
         else {
             globTerm->data->maximized = 0;
         }
-        if (h > 0 && w > 0) {
-            int c, r;
+        if (h > 0 && w > 0 && bmphdc != NULL) {
             win32_terminal_clear_screenbuf(hwnd, w, h, 1, 1);
-            if (globTerm != NULL && globDisplay != NULL) {
-                if (globTerm->data->resize_fonts) {
-                    win32_calc_default_font_size(hwnd, 80, RowsFor80Col + 1, &c,
-                                                 &r);
-                    globTerm->data->font_80_h = r;
-                    globTerm->data->font_80_w = c;
-                    win32_calc_default_font_size(hwnd, 132, RowsFor132Col + 1,
-                                                 &c, &r);
-                    globTerm->data->font_132_h = r;
-                    globTerm->data->font_132_w = c;
-                    globTerm->data->resized = 1;
-                }
-                win32_terminal_update(globTerm, globDisplay);
-            }
+            win32_refit_fonts(hwnd);
         }
         return 0;
 
@@ -2097,6 +2502,9 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
 
     case WM_SYSKEYDOWN:
     case WM_KEYDOWN:
+        if (win32_zoom_key(hwnd, wParam)) {
+            return 0;
+        }
         ctx = HIWORD(lParam) & 0x2000;
         ext = (HIWORD(lParam) & 0x0100) >> 8;
         GetKeyboardState(ks);

@@ -39,6 +39,9 @@ BEGIN
 	END
 	POPUP "&View"
 	BEGIN
+	        MENUITEM "Zoom &in\tCtrl +",            IDM_VIEW_ZOOM_IN
+	        MENUITEM "Zoom &out\tCtrl -",           IDM_VIEW_ZOOM_OUT
+	        MENUITEM "&Large text\tCtrl 0",         IDM_VIEW_ZOOM_RESET
 	        MENUITEM "Change &font...",             IDM_VIEW_FONT
 	END
 	POPUP "&Macro"
