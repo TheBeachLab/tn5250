@@ -24,8 +24,6 @@
 
 IDI_TN5250_ICON ICON "tn5250.ico"
 
-1 24 "dpi.manifest"
-
 tn5250-win32-menu MENU DISCARDABLE
 BEGIN
 	POPUP "&File"

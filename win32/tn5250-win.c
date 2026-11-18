@@ -62,11 +62,32 @@ BOOL CALLBACK ConnectDlgProc(HWND, UINT, WPARAM, LPARAM);
 int GetParams(HWND hDlg);
 int SetParams(HWND hDlg);
 
+/* Per-monitor DPI so a resized window scales real pixels, not a blurry
+ * bitmap. Called before any window exists. No embedded manifest: the
+ * linker already writes one, and a second RT_MANIFEST fails the link. */
+static void enable_per_monitor_dpi(void) {
+    typedef BOOL(WINAPI * SetCtx)(HANDLE);
+    HMODULE user32;
+    SetCtx set_ctx;
+
+    user32 = GetModuleHandleA("user32.dll");
+    if (user32 == NULL) {
+        return;
+    }
+    set_ctx = (SetCtx)GetProcAddress(user32, "SetProcessDpiAwarenessContext");
+    if (set_ctx != NULL) {
+        /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */
+        set_ctx((HANDLE)(LONG_PTR)-4);
+    }
+}
+
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
     WORD winsock_ver;
     WSADATA wsadata;
     char** argv = NULL;
     int argc, x;
+
+    enable_per_monitor_dpi();
 
     argc = parse_cmdline(cmdline, NULL);
     if (argc > 0) {
