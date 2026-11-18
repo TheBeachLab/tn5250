@@ -25,6 +25,8 @@
 
 Tn5250Terminal* tn5250_win32_terminal_new(HINSTANCE hInst, HINSTANCE hPrev,
                                           int show);
+int tn5250_win32_terminal_quit_flag(Tn5250Terminal* This);
+void tn5250_win32_terminal_disconnect(Tn5250Terminal* This);
 
 Tn5250Session* sess = NULL;
 Tn5250Stream* stream = NULL;
@@ -32,6 +34,130 @@ Tn5250Terminal* term = NULL;
 Tn5250Display* display = NULL;
 Tn5250Config* config = NULL;
 Tn5250Macro* macro = NULL;
+
+/* IBM i device names are at most 10 characters. devname_suffix=1, or a
+ * trailing '*', tries NAME then NAMEA, NAMEB, ... the way iSeries
+ * Access does for a name written as FABIAN*. */
+#define TN5250_DEVNAME_MAX 10
+
+static int devname_flag_on(const char* v) {
+    if (v == NULL) {
+        return 0;
+    }
+    if (v[0] == '1' && v[1] == '\0') {
+        return 1;
+    }
+    if ((v[0] == 'y' || v[0] == 'Y') && (v[1] == 'e' || v[1] == 'E') &&
+        (v[2] == 's' || v[2] == 'S') && v[3] == '\0') {
+        return 1;
+    }
+    if ((v[0] == 'o' || v[0] == 'O') && (v[1] == 'n' || v[1] == 'N') &&
+        v[2] == '\0') {
+        return 1;
+    }
+    return 0;
+}
+
+static int devname_prepare(char* base, size_t baselen) {
+    const char* name;
+    const char* flag;
+    size_t n;
+    size_t i;
+    int star = 0;
+
+    name = tn5250_config_get(config, "env.DEVNAME");
+    flag = tn5250_config_get(config, "devname_suffix");
+    if (name == NULL) {
+        return 0;
+    }
+    n = strlen(name);
+    while (n > 0 && (name[n - 1] == ' ' || name[n - 1] == '\t')) {
+        n--;
+    }
+    if (n > 0 && name[n - 1] == '*') {
+        star = 1;
+        n--;
+    }
+    if (!(star || devname_flag_on(flag)) || n == 0) {
+        return 0;
+    }
+    if (n >= baselen) {
+        n = baselen - 1;
+    }
+    if (n > TN5250_DEVNAME_MAX) {
+        n = TN5250_DEVNAME_MAX;
+    }
+    for (i = 0; i < n; i++) {
+        char c = name[i];
+        if (c >= 'a' && c <= 'z') {
+            c = (char)(c - 'a' + 'A');
+        }
+        base[i] = c;
+    }
+    base[n] = '\0';
+    return 1;
+}
+
+static void devname_apply(const char* base, int attempt) {
+    char name[TN5250_DEVNAME_MAX + 1];
+    size_t n = strlen(base);
+
+    if (n > TN5250_DEVNAME_MAX) {
+        n = TN5250_DEVNAME_MAX;
+    }
+    if (attempt <= 0) {
+        memcpy(name, base, n);
+        name[n] = '\0';
+    }
+    else {
+        if (n >= TN5250_DEVNAME_MAX) {
+            n = TN5250_DEVNAME_MAX - 1;
+        }
+        memcpy(name, base, n);
+        name[n] = (char)('A' + (attempt - 1));
+        name[n + 1] = '\0';
+    }
+    tn5250_config_set(config, "env.DEVNAME", name);
+}
+
+/* 1 = the host accepted the name, or the user closed the window.
+ * 0 = the socket dropped before any 5250 record (name in use).
+ * -1 = the TCP connection itself failed. */
+static int win32_session_once(void) {
+    int quit;
+    int got;
+
+    stream = tn5250_stream_open(tn5250_config_get(config, "host"), config);
+    if (stream == NULL) {
+        return -1;
+    }
+    sess = tn5250_session_new();
+    if (sess == NULL) {
+        tn5250_stream_destroy(stream);
+        stream = NULL;
+        return -1;
+    }
+    tn5250_display_set_session(display, sess);
+    term->conn_fd = tn5250_stream_socket_handle(stream);
+    tn5250_session_set_stream(sess, stream);
+    if (tn5250_session_config(sess, config) == -1) {
+        tn5250_session_destroy(sess);
+        sess = NULL;
+        stream = NULL;
+        return -1;
+    }
+    tn5250_session_main_loop(sess);
+    quit = tn5250_win32_terminal_quit_flag(term);
+    got = sess->got_display;
+    tn5250_win32_terminal_disconnect(term);
+    tn5250_session_destroy(sess);
+    sess = NULL;
+    stream = NULL;
+    if (quit || got) {
+        return 1;
+    }
+    return 0;
+}
 
 /* FIXME: This should be moved into session.[ch] or something. */
 static const struct valid_term {
@@ -86,6 +212,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
     WSADATA wsadata;
     char** argv = NULL;
     int argc, x;
+    char devbase[TN5250_DEVNAME_MAX + 1];
+    int devsuffix;
+    int devattempt;
+    int devrc;
+    int devquit;
+    int devgot;
 
     enable_per_monitor_dpi();
 
@@ -142,7 +274,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
     }
 
     if (tn5250_config_get(config, "font_80") == NULL) {
-        tn5250_config_set(config, "font_80", "Courier New");
+        tn5250_config_set(config, "font_80", "Lucida Console");
     }
 
 #ifndef NDEBUG
@@ -152,6 +284,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
 #endif
 
     /* create connection to host */
+    devbase[0] = '\0';
+    devsuffix = devname_prepare(devbase, sizeof(devbase));
+    if (devsuffix) {
+        devname_apply(devbase, 0);
+    }
     stream = tn5250_stream_open(tn5250_config_get(config, "host"), config);
     if (stream == NULL) {
         msgboxf("Unable to open communications stream!");
@@ -210,6 +347,31 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE prev, LPSTR cmdline, int show) {
     tn5250_macro_attach(display, macro);
 
     tn5250_session_main_loop(sess);
+    devquit = tn5250_win32_terminal_quit_flag(term);
+    devgot = sess->got_display;
+
+    /* The host closed the socket before sending a 5250 record. That is
+     * how an in-use device name is reported. Try NAMEA, NAMEB, ... */
+    if (devsuffix && !devquit && !devgot) {
+        tn5250_win32_terminal_disconnect(term);
+        tn5250_session_destroy(sess);
+        sess = NULL;
+        stream = NULL;
+        for (devattempt = 1; devattempt <= 26; devattempt++) {
+            devname_apply(devbase, devattempt);
+            devrc = win32_session_once();
+            if (devrc < 0) {
+                msgboxf("Unable to open communications stream!");
+                break;
+            }
+            if (devrc > 0) {
+                break;
+            }
+        }
+        if (devattempt > 26 && !tn5250_win32_terminal_quit_flag(term)) {
+            msgboxf("Device name is in use.");
+        }
+    }
 
     clean_up_and_exit(0);
     return 0;
@@ -275,6 +437,8 @@ static void usage(void) {
         "\tfont_80=NAME  		Name of font to use in 80 col mode\n"
         "\tfont_132=NAME 		Name of font to use in 132 col mode\n"
         "\tenv.DEVNAME=NAME 	Use NAME as AS/400 device name(default: none)\n"
+        "\tdevname_suffix=1 	If NAME is in use, try NAMEA, NAMEB, ...\n"
+        "\tkey.TOKEN=ACTION 	Windows key map (see tn5250rc)\n"
         "\tenv.TERM=TYPE 		Emulate IBM terminal type\n"
         "\ttrace=FILE 		Log debugging info to FILE\n"
         "\t+/-ssl_verify_server	 	Verify/don't verify the server's SSL "

@@ -1417,6 +1417,18 @@ void tn5250_display_do_key(Tn5250Display* This, int key) {
         tn5250_display_kf_end(This);
         break;
 
+    case K_ERASE:
+        tn5250_display_kf_erase_eof(This);
+        break;
+
+    case K_ERASE_INPUT:
+        tn5250_display_kf_erase_input(This);
+        break;
+
+    case K_CLEAR:
+        tn5250_display_do_aidkey(This, TN5250_SESSION_AID_CLEAR);
+        break;
+
     case K_DELETE:
         tn5250_display_kf_delete(This);
         break;
@@ -1825,6 +1837,70 @@ void tn5250_display_kf_dup(Tn5250Display* This) {
         }
         tn5250_display_set_cursor_next_field(This);
     }
+    return;
+}
+
+/****f* lib5250/tn5250_display_kf_erase_eof
+ * NAME
+ *    tn5250_display_kf_erase_eof
+ * SYNOPSIS
+ *    tn5250_display_kf_erase_eof (This);
+ * INPUTS
+ *    Tn5250Display *      This       -
+ * DESCRIPTION
+ *    Null the current field from the cursor to its end and set MDT.
+ *    The cursor stays where it is.
+ *****/
+void tn5250_display_kf_erase_eof(Tn5250Display* This) {
+    int i;
+    Tn5250Field* field;
+    unsigned char* data;
+
+    field = tn5250_display_current_field(This);
+    if (field == NULL || tn5250_field_is_bypass(field)) {
+        This->keystate = TN5250_KEYSTATE_PREHELP;
+        This->keySRC = TN5250_KBDSRC_PROTECT;
+        tn5250_display_inhibit(This);
+        return;
+    }
+
+    tn5250_field_set_mdt(field);
+    i = tn5250_field_count_left(field, tn5250_display_cursor_y(This),
+                                tn5250_display_cursor_x(This));
+    data = tn5250_display_field_data(This, field);
+    for (; i < tn5250_field_length(field); i++) {
+        data[i] = '\0';
+    }
+    return;
+}
+
+/****f* lib5250/tn5250_display_kf_erase_input
+ * NAME
+ *    tn5250_display_kf_erase_input
+ * SYNOPSIS
+ *    tn5250_display_kf_erase_input (This);
+ * INPUTS
+ *    Tn5250Display *      This       -
+ * DESCRIPTION
+ *    Null every input field, set each MDT, and home the cursor.
+ *****/
+void tn5250_display_kf_erase_input(Tn5250Display* This) {
+    Tn5250Field* field;
+    Tn5250DBuffer* buf;
+
+    buf = tn5250_display_dbuffer(This);
+    field = (buf == NULL) ? NULL : buf->field_list;
+    if (field != NULL) {
+        do {
+            if (!tn5250_field_is_bypass(field)) {
+                unsigned char* data = tn5250_display_field_data(This, field);
+                memset(data, 0, tn5250_field_length(field));
+                tn5250_field_set_mdt(field);
+            }
+            field = field->next;
+        } while (field != buf->field_list);
+    }
+    tn5250_display_set_cursor_home(This);
     return;
 }
 

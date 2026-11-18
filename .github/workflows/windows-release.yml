@@ -33,6 +33,11 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item $exe.FullName dist\tn5250.exe
+          $lp = Get-ChildItem -Recurse -Filter lp5250d.exe build |
+            Where-Object { $_.FullName -match '\\Release\\' } |
+            Select-Object -First 1
+          if (-not $lp) { throw "lp5250d.exe was not produced" }
+          Copy-Item $lp.FullName dist\lp5250d.exe
           Copy-Item README.md dist\README.md
           Copy-Item COPYING dist\COPYING
           Compress-Archive -Path dist\* -DestinationPath tn5250-windows-x64.zip -Force

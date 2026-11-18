@@ -59,11 +59,20 @@ struct _Tn5250Printer {
     unsigned char prevchar;
     Tn5250CharMap* map;
     char* cmd;
+    unsigned char* job;
+    size_t job_len;
+    size_t job_cap;
+    int capture;
+    int passthrough;
 };
 typedef struct _Tn5250Printer Tn5250Printer;
 
 void msgboxf(const char* fmt, ...);
 Tn5250Printer* tn5250_windows_printer_startdoc(void);
+static void printer_job_add(Tn5250Printer* This, const unsigned char* bytes,
+                            size_t n);
+static int printer_wants_pdf(void);
+static void printer_deliver(Tn5250Printer* This);
 int tn5250_windows_printer_scs2ascii(Tn5250Printer* This, unsigned char ch);
 int tn5250_windows_printer_writechar(Tn5250Printer* This, unsigned char ch);
 int tn5250_windows_printer_finishdoc(Tn5250Printer* h);
@@ -233,6 +242,8 @@ int WINAPI WinMain(HINSTANCE i, HINSTANCE p, PSTR cmd, int show) {
     printsess = tn5250_windows_print_session_new();
     tn5250_stream_setenv(stream, "TERM", "IBM-3812-1");
     tn5250_stream_setenv(stream, "IBMFONT", "12");
+    tn5250_stream_keepalive_arm(stream);
+    SetTimer(hWnd, 2, TN5250_KEEPALIVE_PULSE_SEC * 1000, NULL);
     tn5250_windows_printer_status(1, "DEVNAME = %s",
                                   tn5250_stream_getenv(stream, "DEVNAME"));
     if (tn5250_stream_getenv(stream, "IBMMFRTYPMDL")) {
@@ -382,6 +393,354 @@ int GetDefaultPrinter(char* dftprt, int size) {
 #define SCS_STATE_AVPP         17
 
 /*
+ * Buffer one print job, then either draw it on a Windows printer
+ * (Microsoft Print to PDF shows its Save As dialog) or write a PDF
+ * file. Host print transform bytes are not SCS: escape sequences are
+ * skipped and the remaining text is what gets printed.
+ */
+
+static void printer_job_add(Tn5250Printer* This, const unsigned char* bytes,
+                            size_t n) {
+    size_t need;
+    unsigned char* grown;
+
+    if (This == NULL || n == 0 || This->job_len > (8 * 1024 * 1024)) {
+        return;
+    }
+    need = This->job_len + n;
+    if (need > (8 * 1024 * 1024)) {
+        n = (8 * 1024 * 1024) - This->job_len;
+        need = This->job_len + n;
+    }
+    if (need + 1 > This->job_cap) {
+        size_t cap = This->job_cap == 0 ? 4096 : This->job_cap;
+        while (cap < need + 1) {
+            cap *= 2;
+        }
+        grown = (unsigned char*)realloc(This->job, cap);
+        if (grown == NULL) {
+            return;
+        }
+        This->job = grown;
+        This->job_cap = cap;
+    }
+    memcpy(This->job + This->job_len, bytes, n);
+    This->job_len += n;
+    This->job[This->job_len] = '\0';
+}
+
+static int printer_wants_pdf(void) {
+    const char* dir = tn5250_config_get(config, "pdf_dir");
+    const char* prn = tn5250_config_get(config, "pdf_printer");
+
+    if (dir != NULL && dir[0] != '\0') {
+        return 1;
+    }
+    if (prn != NULL && prn[0] != '\0') {
+        return 1;
+    }
+    return 0;
+}
+
+static char* printer_job_text(Tn5250Printer* This) {
+    char* out;
+    size_t i;
+    size_t o = 0;
+    int skip = 0;
+
+    out = (char*)malloc(This->job_len + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    if (This->job == NULL || This->job_len == 0) {
+        out[0] = '\0';
+        return out;
+    }
+    if (!This->passthrough) {
+        memcpy(out, This->job, This->job_len);
+        out[This->job_len] = '\0';
+        return out;
+    }
+    for (i = 0; i < This->job_len; i++) {
+        unsigned char c = This->job[i];
+        if (skip) {
+            if (c >= 0x40 && c <= 0x7e) {
+                skip = 0;
+            }
+            continue;
+        }
+        if (c == 0x1b) {
+            skip = 1;
+            continue;
+        }
+        if (c == '\r') {
+            continue;
+        }
+        if (c == '\n' || c == '\f' || c == '\t' || (c >= 32 && c != 127)) {
+            out[o++] = (char)c;
+        }
+    }
+    out[o] = '\0';
+    return out;
+}
+
+static int pdf_escape(const char* s, int n, char* dst, int dstmax) {
+    int i;
+    int o = 0;
+
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '(' || c == ')' || c == '\\') {
+            if (o + 2 >= dstmax) {
+                break;
+            }
+            dst[o++] = '\\';
+            dst[o++] = (char)c;
+        }
+        else if (c < 32 || c > 126) {
+            if (o + 4 >= dstmax) {
+                break;
+            }
+            dst[o++] = '\\';
+            dst[o++] = (char)('0' + ((c >> 6) & 7));
+            dst[o++] = (char)('0' + ((c >> 3) & 7));
+            dst[o++] = (char)('0' + (c & 7));
+        }
+        else {
+            if (o + 1 >= dstmax) {
+                break;
+            }
+            dst[o++] = (char)c;
+        }
+    }
+    dst[o] = '\0';
+    return o;
+}
+
+static int pdf_add(char** buf, size_t* len, size_t* cap, const char* s) {
+    size_t n = strlen(s);
+    char* grown;
+
+    if (*len + n + 1 > *cap) {
+        size_t next = *cap == 0 ? 4096 : *cap;
+        while (*len + n + 1 > next) {
+            next *= 2;
+        }
+        grown = (char*)realloc(*buf, next);
+        if (grown == NULL) {
+            return 0;
+        }
+        *buf = grown;
+        *cap = next;
+    }
+    memcpy(*buf + *len, s, n + 1);
+    *len += n;
+    return 1;
+}
+
+static int printer_write_pdf(const char* path, const char* text) {
+    FILE* f;
+    char* stream = NULL;
+    size_t slen = 0;
+    size_t scap = 0;
+    const char* p;
+    int lines = 0;
+    long xref[8];
+    long content_len;
+    int i;
+    char piece[900];
+
+    p = text == NULL ? "" : text;
+    if (!pdf_add(&stream, &slen, &scap, "BT /F1 9 Tf 36 760 Td 11 TL\n")) {
+        free(stream);
+        return 0;
+    }
+    while (*p != '\0' && lines < 64) {
+        char esc[700];
+        const char* nl = p;
+        int n;
+        while (*nl != '\0' && *nl != '\n' && *nl != '\f') {
+            nl++;
+        }
+        n = (int)(nl - p);
+        if (n > 132) {
+            n = 132;
+        }
+        pdf_escape(p, n, esc, (int)sizeof(esc));
+        _snprintf(piece, sizeof(piece), "(%s) Tj T*\n", esc);
+        piece[sizeof(piece) - 1] = '\0';
+        if (!pdf_add(&stream, &slen, &scap, piece)) {
+            free(stream);
+            return 0;
+        }
+        lines++;
+        if (*nl == '\0' || *nl == '\f') {
+            break;
+        }
+        p = nl + 1;
+    }
+    if (!pdf_add(&stream, &slen, &scap, "ET\n")) {
+        free(stream);
+        return 0;
+    }
+    f = fopen(path, "wb");
+    if (f == NULL) {
+        free(stream);
+        return 0;
+    }
+    fprintf(f, "%%PDF-1.4\n");
+    xref[1] = ftell(f);
+    fprintf(f, "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n");
+    xref[2] = ftell(f);
+    fprintf(f, "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n");
+    xref[3] = ftell(f);
+    fprintf(f, "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+               "/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> "
+               "endobj\n");
+    xref[4] = ftell(f);
+    content_len = (long)slen;
+    fprintf(f, "4 0 obj << /Length %ld >> stream\n", content_len);
+    fwrite(stream, 1, slen, f);
+    fprintf(f, "endstream endobj\n");
+    xref[5] = ftell(f);
+    fprintf(f, "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> "
+               "endobj\n");
+    xref[6] = ftell(f);
+    fprintf(f, "xref\n0 6\n0000000000 65535 f \n");
+    for (i = 1; i <= 5; i++) {
+        fprintf(f, "%010ld 00000 n \n", xref[i]);
+    }
+    fprintf(f, "trailer << /Size 6 /Root 1 0 R >>\nstartxref\n%ld\n%%%%EOF\n",
+            xref[6]);
+    fclose(f);
+    free(stream);
+    return 1;
+}
+
+static void printer_gdi(const char* printer, const char* text) {
+    HDC dc;
+    HFONT font;
+    DOCINFOA di;
+    const char* p;
+    int y;
+    int lh;
+    int page = 0;
+
+    dc = CreateDCA("WINSPOOL", printer, NULL, NULL);
+    if (dc == NULL) {
+        return;
+    }
+    font = CreateFontA(-MulDiv(10, GetDeviceCaps(dc, LOGPIXELSY), 72), 0, 0, 0,
+                       FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                       FIXED_PITCH | FF_MODERN, "Courier New");
+    memset(&di, 0, sizeof(di));
+    di.cbSize = sizeof(di);
+    di.lpszDocName = "5250";
+    if (StartDocA(dc, &di) <= 0) {
+        if (font != NULL) {
+            DeleteObject(font);
+        }
+        DeleteDC(dc);
+        return;
+    }
+    p = text == NULL ? "" : text;
+    while (page < 30) {
+        int bottom = GetDeviceCaps(dc, VERTRES) - 48;
+        StartPage(dc);
+        if (font != NULL) {
+            SelectObject(dc, font);
+        }
+        SetBkMode(dc, TRANSPARENT);
+        y = 48;
+        lh = MulDiv(12, GetDeviceCaps(dc, LOGPIXELSY), 72);
+        if (lh < 1) {
+            lh = 12;
+        }
+        while (*p != '\0' && y < bottom) {
+            const char* nl = p;
+            int n;
+            char line[160];
+            while (*nl != '\0' && *nl != '\n' && *nl != '\f') {
+                nl++;
+            }
+            n = (int)(nl - p);
+            if (n > 132) {
+                n = 132;
+            }
+            memcpy(line, p, (size_t)n);
+            line[n] = '\0';
+            TextOutA(dc, 36, y, line, n);
+            y += lh;
+            if (*nl == '\0') {
+                p = nl;
+                break;
+            }
+            if (*nl == '\f') {
+                p = nl + 1;
+                break;
+            }
+            p = nl + 1;
+        }
+        EndPage(dc);
+        page++;
+        if (*p == '\0') {
+            break;
+        }
+    }
+    EndDoc(dc);
+    if (font != NULL) {
+        DeleteObject(font);
+    }
+    DeleteDC(dc);
+}
+
+static void printer_deliver(Tn5250Printer* This) {
+    const char* dir = tn5250_config_get(config, "pdf_dir");
+    const char* prn = tn5250_config_get(config, "pdf_printer");
+    char* text;
+    char path[MAX_PATH];
+
+    text = printer_job_text(This);
+    if (dir != NULL && dir[0] != '\0') {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        _snprintf(path, sizeof(path), "%s\\5250-%04u%02u%02u-%02u%02u%02u.pdf",
+                  dir, (unsigned)st.wYear, (unsigned)st.wMonth,
+                  (unsigned)st.wDay, (unsigned)st.wHour, (unsigned)st.wMinute,
+                  (unsigned)st.wSecond);
+        path[sizeof(path) - 1] = '\0';
+        if (printer_write_pdf(path, text == NULL ? "" : text)) {
+            ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
+        }
+    }
+    else if (prn != NULL && prn[0] != '\0') {
+        HDC probe = CreateDCA("WINSPOOL", prn, NULL, NULL);
+        if (probe != NULL) {
+            DeleteDC(probe);
+            printer_gdi(prn, text == NULL ? "" : text);
+        }
+        else {
+            OPENFILENAMEA ofn;
+            memset(&ofn, 0, sizeof(ofn));
+            memset(path, 0, sizeof(path));
+            strcpy(path, "5250.pdf");
+            ofn.lStructSize = sizeof(ofn);
+            ofn.lpstrFilter = "PDF\0*.pdf\0";
+            ofn.lpstrFile = path;
+            ofn.nMaxFile = sizeof(path);
+            ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+            ofn.lpstrDefExt = "pdf";
+            if (GetSaveFileNameA(&ofn) &&
+                printer_write_pdf(path, text == NULL ? "" : text)) {
+                ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
+            }
+        }
+    }
+    free(text);
+}
+
+/*
  *  Start a new document to be printed
  *
  */
@@ -396,8 +755,12 @@ Tn5250Printer* tn5250_windows_printer_startdoc(void) {
     char* cmd = NULL;
 
     devname = malloc(MAXDEVNAME + 1);
+    devname[0] = '\0';
 
-    if (tn5250_config_get(config, "outputcommand")) {
+    if (printer_wants_pdf()) {
+        /* PDF output does not need a Windows printer queue up front. */
+    }
+    else if (tn5250_config_get(config, "outputcommand")) {
         len = strlen(tn5250_config_get(config, "outputcommand"));
         temp = malloc(len + 1);
         strcpy(temp, tn5250_config_get(config, "outputcommand"));
@@ -444,6 +807,17 @@ Tn5250Printer* tn5250_windows_printer_startdoc(void) {
     This->prevchar = 0;
     This->count = 0;
     This->cmd = NULL;
+    This->job = NULL;
+    This->job_len = 0;
+    This->job_cap = 0;
+    This->capture = printer_wants_pdf();
+    This->passthrough =
+        tn5250_stream_getenv(stream, "IBMMFRTYPMDL") != NULL ? 1 : 0;
+
+    if (This->capture) {
+        free(devname);
+        return This;
+    }
 
     if (iscmd) {
         cmd = strchr(devname, '?');
@@ -492,6 +866,11 @@ int tn5250_windows_printer_writechar(Tn5250Printer* This, unsigned char c) {
 
     DWORD written;
 
+    if (This->capture) {
+        printer_job_add(This, (const unsigned char*)&c, 1);
+        return 1;
+    }
+
     if (This->devh != NULL) {
         WritePrinter(This->devh, (LPVOID)&c, 1, (LPDWORD)&written);
         if (c == '\f') {
@@ -515,6 +894,14 @@ int tn5250_windows_printer_writechar(Tn5250Printer* This, unsigned char c) {
  */
 
 int tn5250_windows_printer_finishdoc(Tn5250Printer* This) {
+
+    if (This->capture) {
+        printer_deliver(This);
+        free(This->job);
+        tn5250_char_map_destroy(This->map);
+        free(This);
+        return 0;
+    }
 
     if (This->devh != NULL) {
         if (This->openpg == 1) {
@@ -1175,9 +1562,23 @@ void tn5250_windows_print_session_main_loop(Tn5250PrintSession* This) {
                         newjob = 1;
                     }
                     else {
+                        Tn5250Printer* pj = (Tn5250Printer*)prthdl;
                         while (!tn5250_record_is_chain_end(This->rec)) {
-                            tn5250_windows_printer_scs2ascii(
-                                prthdl, tn5250_record_get_byte(This->rec));
+                            unsigned char ch =
+                                tn5250_record_get_byte(This->rec);
+                            /* Host print transform sends the printer
+                             * language itself. Do not parse it as SCS. */
+                            if (pj != NULL && pj->passthrough) {
+                                if (pj->capture) {
+                                    printer_job_add(pj, &ch, 1);
+                                }
+                                else {
+                                    tn5250_windows_printer_writechar(pj, ch);
+                                }
+                            }
+                            else {
+                                tn5250_windows_printer_scs2ascii(pj, ch);
+                            }
                         }
                     }
                 }
@@ -1333,6 +1734,13 @@ LRESULT CALLBACK tn5250_windows_printer_wndproc(HWND hwnd, UINT nMsg,
             break;
         }
         return 0;
+
+    case WM_TIMER:
+        if (wParam == 2) {
+            tn5250_stream_keepalive_pulse();
+            return 0;
+        }
+        break;
 
     case WM_TN5250_STREAM_DATA:
         /* this is our special message to tell us that network data

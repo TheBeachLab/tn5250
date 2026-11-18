@@ -44,69 +44,70 @@ extern "C" {
 
 #define K_FIRST_SPECIAL 0400 /* Coincides with first Curses key. */
 
-#define K_ENTER      0x0d
-#define K_NEWLINE    0x200
-#define K_TAB        0x09
-#define K_BACKTAB    0541
-#define K_F1         (0410 + 1)
-#define K_F2         (0410 + 2)
-#define K_F3         (0410 + 3)
-#define K_F4         (0410 + 4)
-#define K_F5         (0410 + 5)
-#define K_F6         (0410 + 6)
-#define K_F7         (0410 + 7)
-#define K_F8         (0410 + 8)
-#define K_F9         (0410 + 9)
-#define K_F10        (0410 + 10)
-#define K_F11        (0410 + 11)
-#define K_F12        (0410 + 12)
-#define K_F13        (0410 + 13)
-#define K_F14        (0410 + 14)
-#define K_F15        (0410 + 15)
-#define K_F16        (0410 + 16)
-#define K_F17        (0410 + 17)
-#define K_F18        (0410 + 18)
-#define K_F19        (0410 + 19)
-#define K_F20        (0410 + 20)
-#define K_F21        (0410 + 21)
-#define K_F22        (0410 + 22)
-#define K_F23        (0410 + 23)
-#define K_F24        (0410 + 24)
-#define K_LEFT       0404
-#define K_RIGHT      0405
-#define K_UP         0403
-#define K_DOWN       0402
-#define K_ROLLDN     0523
-#define K_ROLLUP     0522
-#define K_BACKSPACE  0407
-#define K_HOME       0406
-#define K_END        0550
-#define K_INSERT     0513
-#define K_DELETE     0512
-#define K_RESET      0531
-#define K_PRINT      0532
-#define K_HELP       0553
-#define K_SYSREQ     0401   /* curses KEY_BREAK */
-#define K_CLEAR      0515   /* curses KEY_CLEAR */
-#define K_REFRESH    0564   /* curses KEY_REFRESH */
-#define K_FIELDEXIT  0517   /* curses KEY_EOL (clear to EOL) */
-#define K_TESTREQ    0516   /* curses KEY_EOS (as good as any) */
-#define K_TOGGLE     0533   /* curses KEY_LL (as good as any) */
-#define K_ERASE      0514   /* curses KEY_EIC (as good as any) */
-#define K_ATTENTION  0511   /* curses KEY_IL (as good as any) */
-#define K_DUPLICATE  0524   /* curses KEY_STAB (set tab - good as any) */
-#define K_FIELDMINUS 0526   /* curses KEY_CATAB (clear all tabs - g.a.a.) */
-#define K_FIELDPLUS  0520   /* curses KEY_SF */
-#define K_PREVWORD   0611   /* curses KEY_SLEFT (as good as any) */
-#define K_NEXTWORD   0622   /* curses KEY_SRIGHT (as good as any) */
-#define K_PREVFLD    0xfffb /* no similar curses key */
-#define K_NEXTFLD    0xfffc /* no similar curses key */
-#define K_FIELDHOME  0607   /* curses KEY_SHOME (as good as any) */
-#define K_EXEC       0507   /* macro execution */
-#define K_MEMO       0510   /* macro record */
-#define K_COPY_TEXT  0xfffd /* no similar curses key */
-#define K_PASTE_TEXT 0xfffe /* no similar curses key */
-#define K_UNKNOW     0xffff
+#define K_ENTER       0x0d
+#define K_NEWLINE     0x200
+#define K_TAB         0x09
+#define K_BACKTAB     0541
+#define K_F1          (0410 + 1)
+#define K_F2          (0410 + 2)
+#define K_F3          (0410 + 3)
+#define K_F4          (0410 + 4)
+#define K_F5          (0410 + 5)
+#define K_F6          (0410 + 6)
+#define K_F7          (0410 + 7)
+#define K_F8          (0410 + 8)
+#define K_F9          (0410 + 9)
+#define K_F10         (0410 + 10)
+#define K_F11         (0410 + 11)
+#define K_F12         (0410 + 12)
+#define K_F13         (0410 + 13)
+#define K_F14         (0410 + 14)
+#define K_F15         (0410 + 15)
+#define K_F16         (0410 + 16)
+#define K_F17         (0410 + 17)
+#define K_F18         (0410 + 18)
+#define K_F19         (0410 + 19)
+#define K_F20         (0410 + 20)
+#define K_F21         (0410 + 21)
+#define K_F22         (0410 + 22)
+#define K_F23         (0410 + 23)
+#define K_F24         (0410 + 24)
+#define K_LEFT        0404
+#define K_RIGHT       0405
+#define K_UP          0403
+#define K_DOWN        0402
+#define K_ROLLDN      0523
+#define K_ROLLUP      0522
+#define K_BACKSPACE   0407
+#define K_HOME        0406
+#define K_END         0550
+#define K_INSERT      0513
+#define K_DELETE      0512
+#define K_RESET       0531
+#define K_PRINT       0532
+#define K_HELP        0553
+#define K_SYSREQ      0401   /* curses KEY_BREAK */
+#define K_CLEAR       0515   /* curses KEY_CLEAR */
+#define K_REFRESH     0564   /* curses KEY_REFRESH */
+#define K_FIELDEXIT   0517   /* curses KEY_EOL (clear to EOL) */
+#define K_TESTREQ     0516   /* curses KEY_EOS (as good as any) */
+#define K_TOGGLE      0533   /* curses KEY_LL (as good as any) */
+#define K_ERASE       0514   /* curses KEY_EIC (as good as any) */
+#define K_ERASE_INPUT 0xfffa /* erase all input fields; no curses key */
+#define K_ATTENTION   0511   /* curses KEY_IL (as good as any) */
+#define K_DUPLICATE   0524   /* curses KEY_STAB (set tab - good as any) */
+#define K_FIELDMINUS  0526   /* curses KEY_CATAB (clear all tabs - g.a.a.) */
+#define K_FIELDPLUS   0520   /* curses KEY_SF */
+#define K_PREVWORD    0611   /* curses KEY_SLEFT (as good as any) */
+#define K_NEXTWORD    0622   /* curses KEY_SRIGHT (as good as any) */
+#define K_PREVFLD     0xfffb /* no similar curses key */
+#define K_NEXTFLD     0xfffc /* no similar curses key */
+#define K_FIELDHOME   0607   /* curses KEY_SHOME (as good as any) */
+#define K_EXEC        0507   /* macro execution */
+#define K_MEMO        0510   /* macro record */
+#define K_COPY_TEXT   0xfffd /* no similar curses key */
+#define K_PASTE_TEXT  0xfffe /* no similar curses key */
+#define K_UNKNOW      0xffff
 
 struct _Tn5250Display;
 
