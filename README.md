@@ -100,7 +100,7 @@ Idle sessions send TCP keepalive probes (60 seconds idle, then every 15 seconds;
 
 The Windows key map can be overridden from `tn5250rc` with `key.TOKEN=ACTION` lines (for example `key.end=erase_eof`, `key.pause=clear`, `key.shift+insert=dup`). Clear sends the Clear AID, Dup is the 5250 Dup key, and Erase EOF nulls the field from the cursor to its end. `key.erase_input` is available if you map it. Ctrl+Plus, Ctrl+Minus and Ctrl+0 still zoom and are not sent to the host.
 
-`devname_suffix=1`, or a trailing `*` on `env.DEVNAME`, retries a device name that is already in use as NAME, NAMEA, NAMEB, and so on, up to 10 characters. The next name is tried only when the host drops the socket before any 5250 screen.
+`devname_suffix=1`, or a trailing `*` on `env.DEVNAME`, retries a device name that the host rejects as NAME2, NAME3, and so on through NAME9, up to 10 characters. The next name is tried only when the socket drops, or 12 seconds pass, before any 5250 screen. Closing the window does not try another name.
 
 ### Cutting a release
 

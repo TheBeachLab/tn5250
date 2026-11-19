@@ -7,7 +7,12 @@ include(GNUInstallDirs)
 find_package(OpenSSL)
 
 # A Windows zip should run without a separate Visual C++ redistributable.
+# CMP0091 stays at the old behavior when cmake_minimum_required is 3.12,
+# which ignores CMAKE_MSVC_RUNTIME_LIBRARY and still links the DLL CRT.
 # Skip this when OpenSSL is linked: its import libs expect the DLL CRT.
+if (POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif()
 if (MSVC AND NOT OPENSSL_FOUND)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

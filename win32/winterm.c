@@ -239,6 +239,7 @@ struct _Tn5250TerminalPrivate {
     PRINTDLG* pd;
     int resized : 1;
     int quit_flag : 1;
+    int connect_give_up : 1;
     int display_ruler : 1;
     int is_focused : 1;
     int selecting : 1;
@@ -746,6 +747,7 @@ Tn5250Terminal* tn5250_win32_terminal_new(HINSTANCE hInst, HINSTANCE hPrev,
     r->data->beeptype = MB_OK;
     r->data->beepfile = NULL;
     r->data->quit_flag = 0;
+    r->data->connect_give_up = 0;
     r->data->last_width = 0;
     r->data->last_height = 0;
     r->data->font_80 = NULL;
@@ -761,6 +763,7 @@ Tn5250Terminal* tn5250_win32_terminal_new(HINSTANCE hInst, HINSTANCE hPrev,
     r->data->caretok = 0;
     r->data->carety = 0;
     r->data->quit_flag = 0;
+    r->data->connect_give_up = 0;
     r->data->k_buf_len = 0;
     r->data->selstr.x = 0;
     r->data->selstr.y = 0;
@@ -809,6 +812,21 @@ int tn5250_win32_terminal_quit_flag(Tn5250Terminal* This) {
         return 0;
     }
     return This->data->quit_flag ? 1 : 0;
+}
+
+void tn5250_win32_terminal_arm_connect_wait(Tn5250Terminal* This) {
+    if (This == NULL || This->data == NULL || This->data->hwndMain == NULL) {
+        return;
+    }
+    This->data->connect_give_up = 0;
+    SetTimer(This->data->hwndMain, 3, 12000, NULL);
+}
+
+int tn5250_win32_terminal_connect_give_up(Tn5250Terminal* This) {
+    if (This == NULL || This->data == NULL) {
+        return 0;
+    }
+    return This->data->connect_give_up ? 1 : 0;
 }
 
 void tn5250_win32_terminal_disconnect(Tn5250Terminal* This) {
@@ -1130,6 +1148,7 @@ static void win32_terminal_init(Tn5250Terminal* This) {
     This->data->caretok = 0;
     This->data->carety = 0;
     This->data->quit_flag = 0;
+    This->data->connect_give_up = 0;
     This->data->k_buf_len = 0;
     This->data->copymode = 0;
     This->data->pd = NULL;
@@ -2343,7 +2362,8 @@ static int win32_terminal_waitevent(Tn5250Terminal* This) {
 
     if (This->conn_fd != -1) {
         if (WSAAsyncSelect(This->conn_fd, This->data->hwndMain,
-                           WM_TN5250_STREAM_DATA, FD_READ) == SOCKET_ERROR) {
+                           WM_TN5250_STREAM_DATA,
+                           FD_READ | FD_CLOSE) == SOCKET_ERROR) {
             TN5250_LOG(("WIN32: WSAASyncSelect failed, reason: %d\n",
                         WSAGetLastError()));
             return TN5250_TERMINAL_EVENT_QUIT;
@@ -2661,6 +2681,11 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
 
     case WM_DESTROY:
         win32_ui_save(hwnd);
+        /* Closing the window is the user leaving. It is not a rejected
+         * device name. */
+        if (globTerm != NULL) {
+            globTerm->data->quit_flag = 1;
+        }
         PostQuitMessage(0);
         return 0;
         break;
@@ -2668,6 +2693,18 @@ LRESULT CALLBACK win32_terminal_wndproc(HWND hwnd, UINT msg, WPARAM wParam,
     case WM_TIMER:
         if (wParam == WIN32_KEEPALIVE_TIMER) {
             tn5250_stream_keepalive_pulse();
+            return 0;
+        }
+        if (wParam == 3) {
+            KillTimer(hwnd, 3);
+            if (globDisplay != NULL && globDisplay->session != NULL &&
+                globDisplay->session->got_display) {
+                return 0;
+            }
+            if (globTerm != NULL) {
+                globTerm->data->connect_give_up = 1;
+            }
+            PostQuitMessage(0);
             return 0;
         }
         break;

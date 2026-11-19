@@ -196,19 +196,23 @@ for a fixed font and a window that does not scale.
 .BI devname_suffix= 1
 Windows only. When
 .B env.DEVNAME
-is set and that device is already in use, try the name, then the name
-plus
-.BR A ,
-.BR B ,
+is set and the host drops the connection before any 5250 screen, try
+the name, then the name plus
+.BR 2 ,
+.BR 3 ,
 and so on through
-.BR Z
-(at most 10 characters, matching an iSeries Access name written with a
-trailing star). A trailing
+.B 9
+(at most 10 characters). A trailing
 .B *
 on
 .B env.DEVNAME
-turns this on as well. The socket closing before any 5250 record is
-treated as "name in use". A failure to connect does not try another name.
+turns this on as well. Closing the window does not count as a rejected
+name. A failure to connect does not try another name.
+.B avoid_devname
+is a name this session must not use, so a display session and a
+printer session stay on different devices.
+.B device_busy_message
+replaces the text shown when every alternative name fails.
 .TP
 .BI key. TOKEN = ACTION
 Windows only. Overrides one key in the built-in map. Tokens include

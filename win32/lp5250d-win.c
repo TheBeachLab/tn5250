@@ -47,6 +47,8 @@ Tn5250Stream* stream = NULL;
 Tn5250Config* config = NULL;
 char globStatus[MAXMSG + 1];
 NOTIFYICONDATA nid;
+static int printer_established = 0;
+static int printer_user_stop = 0;
 
 struct _Tn5250Printer {
     int openpg;
@@ -93,6 +95,69 @@ static int tn5250_windows_print_session_waitevent(Tn5250PrintSession* This);
 LRESULT CALLBACK tn5250_windows_printer_wndproc(HWND hwnd, UINT nMsg,
                                                 WPARAM wParam, LPARAM lParam);
 int parse_cmdline(char* cmdline, char** my_argv);
+
+static int printer_name_same(const char* a, const char* b) {
+    size_t i;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    for (i = 0;; i++) {
+        char ca = a[i];
+        char cb = b[i];
+        if (ca >= 'a' && ca <= 'z') {
+            ca = (char)(ca - 'a' + 'A');
+        }
+        if (cb >= 'a' && cb <= 'z') {
+            cb = (char)(cb - 'a' + 'A');
+        }
+        if (ca != cb) {
+            return 0;
+        }
+        if (ca == '\0') {
+            return 1;
+        }
+    }
+}
+
+/* attempt 0 is the configured name. Later attempts are NAME2, NAME3, ... */
+static void printer_apply_devname(const char* base, int attempt) {
+    char name[11];
+    char suffix[8];
+    size_t n = strlen(base);
+    size_t sn;
+
+    if (n > 10) {
+        n = 10;
+    }
+    if (attempt <= 0) {
+        memcpy(name, base, n);
+        name[n] = '\0';
+    }
+    else {
+        sprintf(suffix, "%d", attempt + 1);
+        sn = strlen(suffix);
+        if (n + sn > 10) {
+            n = 10 - sn;
+        }
+        memcpy(name, base, n);
+        memcpy(name + n, suffix, sn + 1);
+    }
+    tn5250_config_set(config, "env.DEVNAME", name);
+}
+
+static int printer_devname_blocked(void) {
+    const char* name = tn5250_config_get(config, "env.DEVNAME");
+    const char* avoid = tn5250_config_get(config, "avoid_devname");
+
+    return printer_name_same(name, avoid);
+}
+
+static int printer_suffix_on(void) {
+    const char* suf = tn5250_config_get(config, "devname_suffix");
+
+    return suf != NULL && (suf[0] == '1' || suf[0] == 'y' || suf[0] == 'Y');
+}
 
 int WINAPI WinMain(HINSTANCE i, HINSTANCE p, PSTR cmd, int show) {
 
@@ -227,52 +292,89 @@ int WINAPI WinMain(HINSTANCE i, HINSTANCE p, PSTR cmd, int show) {
     }
 #endif
 
-    /* Create a new network stream */
+    /* One printer device, distinct from the display name in
+     * avoid_devname. If that device is rejected, try NAME2..NAME9. */
+    {
+        const char* configured = tn5250_config_get(config, "env.DEVNAME");
+        char base[11];
+        int attempt = 0;
+        int tries = 1;
+        size_t n;
 
-    stream = tn5250_stream_open(tn5250_config_get(config, "host"), config);
-    if (stream == NULL) {
-        msgboxf("Couldn't connect to %s", tn5250_config_get(config, "host"));
-        Shell_NotifyIcon(NIM_DELETE, &nid);
-        exit(1);
+        base[0] = '\0';
+        if (configured != NULL) {
+            n = strlen(configured);
+            if (n > 10) {
+                n = 10;
+            }
+            memcpy(base, configured, n);
+            base[n] = '\0';
+            if (printer_suffix_on()) {
+                tries = 9;
+            }
+        }
+        for (; attempt < tries; attempt++) {
+            if (base[0] != '\0') {
+                printer_apply_devname(base, attempt);
+                if (printer_devname_blocked()) {
+                    continue;
+                }
+            }
+            stream =
+                tn5250_stream_open(tn5250_config_get(config, "host"), config);
+            if (stream == NULL) {
+                msgboxf("Couldn't connect to %s",
+                        tn5250_config_get(config, "host"));
+                break;
+            }
+            printsess = tn5250_windows_print_session_new();
+            tn5250_stream_setenv(stream, "TERM", "IBM-3812-1");
+            tn5250_stream_setenv(stream, "IBMFONT", "12");
+            tn5250_stream_keepalive_arm(stream);
+            SetTimer(hWnd, 2, TN5250_KEEPALIVE_PULSE_SEC * 1000, NULL);
+            SetTimer(hWnd, 3, 12000, NULL);
+            tn5250_windows_printer_status(
+                1, "DEVNAME = %s", tn5250_stream_getenv(stream, "DEVNAME"));
+            if (tn5250_stream_getenv(stream, "IBMMFRTYPMDL")) {
+                tn5250_stream_setenv(stream, "IBMTRANSFORM", "1");
+            }
+            else {
+                tn5250_stream_setenv(stream, "IBMTRANSFORM", "0");
+            }
+            tn5250_windows_print_session_set_fd(
+                printsess, tn5250_stream_socket_handle(stream));
+            tn5250_windows_print_session_set_stream(printsess, stream);
+            if (tn5250_config_get(config, "map")) {
+                tn5250_windows_print_session_set_char_map(
+                    printsess, tn5250_config_get(config, "map"));
+            }
+            else {
+                tn5250_windows_print_session_set_char_map(printsess, "37");
+            }
+            printer_established = 0;
+            tn5250_windows_print_session_main_loop(printsess);
+            tn5250_windows_print_session_destroy(printsess);
+            printsess = NULL;
+            stream = NULL;
+            if (printer_established || printer_user_stop) {
+                break;
+            }
+        }
+        if (!printer_established && !printer_user_stop && base[0] != '\0' &&
+            printer_suffix_on()) {
+            const char* busy = tn5250_config_get(config, "device_busy_message");
+            if (busy != NULL && busy[0] != '\0') {
+                msgboxf("%s", busy);
+            }
+            else {
+                msgboxf("Printer device name is in use.");
+            }
+        }
     }
-
-    /* set up a new print session, and set some of the parms
-       of both the stream & the session */
-
-    printsess = tn5250_windows_print_session_new();
-    tn5250_stream_setenv(stream, "TERM", "IBM-3812-1");
-    tn5250_stream_setenv(stream, "IBMFONT", "12");
-    tn5250_stream_keepalive_arm(stream);
-    SetTimer(hWnd, 2, TN5250_KEEPALIVE_PULSE_SEC * 1000, NULL);
-    tn5250_windows_printer_status(1, "DEVNAME = %s",
-                                  tn5250_stream_getenv(stream, "DEVNAME"));
-    if (tn5250_stream_getenv(stream, "IBMMFRTYPMDL")) {
-        TN5250_LOG(
-            ("TRANSFORM = %s", tn5250_stream_getenv(stream, "IBMMFRTYPMDL")));
-        tn5250_stream_setenv(stream, "IBMTRANSFORM", "1");
-    }
-    else {
-        tn5250_stream_setenv(stream, "IBMTRANSFORM", "0");
-    }
-    tn5250_windows_print_session_set_fd(printsess,
-                                        tn5250_stream_socket_handle(stream));
-    tn5250_windows_print_session_set_stream(printsess, stream);
-    if (tn5250_config_get(config, "map")) {
-        tn5250_windows_print_session_set_char_map(
-            printsess, tn5250_config_get(config, "map"));
-    }
-    else {
-        tn5250_windows_print_session_set_char_map(printsess, "37");
-    }
-
-    /* now do the work */
-
-    tn5250_windows_print_session_main_loop(printsess);
 
     /* shut down, we're done */
 
-    tn5250_windows_print_session_destroy(printsess);
-    tn5250_stream_destroy(stream);
+    Shell_NotifyIcon(NIM_DELETE, &nid);
     if (config != NULL) {
         tn5250_config_unref(config);
     }
@@ -1514,13 +1616,14 @@ void tn5250_windows_print_session_main_loop(Tn5250PrintSession* This) {
                         Shell_NotifyIcon(NIM_DELETE, &nid);
                         exit(1);
                     }
+                    printer_established = 1;
+                    KillTimer(hWnd, 3);
                     break;
                 }
             }
             else {
                 tn5250_windows_printer_status(2, "Socket closed by host.\n");
-                Shell_NotifyIcon(NIM_DELETE, &nid);
-                exit(-1);
+                return;
             }
         }
     }
@@ -1585,8 +1688,7 @@ void tn5250_windows_print_session_main_loop(Tn5250PrintSession* This) {
             }
             else {
                 tn5250_windows_printer_status(2, "Socket closed by host\n");
-                Shell_NotifyIcon(NIM_DELETE, &nid);
-                exit(-1);
+                return;
             }
         }
     }
@@ -1612,8 +1714,8 @@ static int tn5250_windows_print_session_waitevent(Tn5250PrintSession* This) {
 
     /* Turn on async notification of data being received on the socket: */
 
-    if (WSAAsyncSelect(This->conn_fd, hWnd, WM_TN5250_STREAM_DATA, FD_READ) ==
-        SOCKET_ERROR) {
+    if (WSAAsyncSelect(This->conn_fd, hWnd, WM_TN5250_STREAM_DATA,
+                       FD_READ | FD_CLOSE) == SOCKET_ERROR) {
         TN5250_LOG(("WSAAsyncSelect failed, reason: %d\n", WSAGetLastError()));
         return 0;
     }
@@ -1675,8 +1777,21 @@ LRESULT CALLBACK tn5250_windows_printer_wndproc(HWND hwnd, UINT nMsg,
         break;
 
     case WM_DESTROY:
+        printer_user_stop = 1;
         PostQuitMessage(0);
         return 0;
+        break;
+
+    case WM_TIMER:
+        if (wParam == 3 && !printer_established) {
+            KillTimer(hwnd, 3);
+            PostQuitMessage(0);
+            return 0;
+        }
+        if (wParam == 2) {
+            tn5250_stream_keepalive_pulse();
+            return 0;
+        }
         break;
 
     case WM_MOVE:
@@ -1734,13 +1849,6 @@ LRESULT CALLBACK tn5250_windows_printer_wndproc(HWND hwnd, UINT nMsg,
             break;
         }
         return 0;
-
-    case WM_TIMER:
-        if (wParam == 2) {
-            tn5250_stream_keepalive_pulse();
-            return 0;
-        }
-        break;
 
     case WM_TN5250_STREAM_DATA:
         /* this is our special message to tell us that network data
