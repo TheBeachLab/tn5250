@@ -1850,13 +1850,6 @@ LRESULT CALLBACK tn5250_windows_printer_wndproc(HWND hwnd, UINT nMsg,
         }
         return 0;
 
-    case WM_TIMER:
-        if (wParam == 2) {
-            tn5250_stream_keepalive_pulse();
-            return 0;
-        }
-        break;
-
     case WM_TN5250_STREAM_DATA:
         /* this is our special message to tell us that network data
            has arrived.  the waitevent() func will be looking for this
