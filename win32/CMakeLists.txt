@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.12)
 project(tn5250-win32 LANGUAGES C)
 
+# The 3.12 default ignores CMAKE_MSVC_RUNTIME_LIBRARY. The parent asks
+# for the static runtime so the Windows zip needs no redistributable.
+if (POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif()
+
 include_directories(${CMAKE_BINARY_DIR} ../lib5250 )
 
 add_executable(tn5250 WIN32 tn5250-win.c tn5250-res.rc winterm.c)
