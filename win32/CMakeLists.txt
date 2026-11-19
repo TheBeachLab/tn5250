@@ -18,3 +18,11 @@ target_link_libraries(lp5250d 5250)
 
 add_executable(dftmap WIN32 dftmap.c)
 target_link_libraries(dftmap 5250)
+
+if (MSVC)
+    foreach(target tn5250 lp5250d dftmap)
+        set_property(TARGET ${target} PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(${target} PRIVATE /MT$<$<CONFIG:Debug>:d>)
+    endforeach()
+endif()

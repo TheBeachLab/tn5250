@@ -18,3 +18,9 @@ endif()
 if (WIN32)
     target_link_libraries(5250 Ws2_32 Winmm)
 endif()
+
+if (MSVC)
+    set_property(TARGET 5250 PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(5250 PRIVATE /MT$<$<CONFIG:Debug>:d>)
+endif()
